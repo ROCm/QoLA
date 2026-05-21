@@ -25,8 +25,26 @@ def main(argv: list[str] | None = None) -> int:
     build_p.add_argument(
         "--aiter-root",
         "-a",
-        required=True,
-        help="Path to the AITER source tree root",
+        default=None,
+        help="Path to the AITER source tree root. Defaults to "
+        "<QoLA repo>/3rdparty/aiter, a git-ignored directory that QoLA "
+        "clones into on first use.",
+    )
+    build_p.add_argument(
+        "--aiter-commit",
+        default=None,
+        help="AITER git commit (full SHA, short SHA, tag, or branch) to "
+        "fetch and checkout in --aiter-root before building. Overrides the "
+        "manifest's [qola] aiter_commit. When unset everywhere, builds "
+        "against whatever is currently checked out.",
+    )
+    build_p.add_argument(
+        "--patches-dir",
+        default=None,
+        help="Directory of *.patch files to apply on top of the AITER "
+        "checkout (lex order, git apply --3way, hard-fail on conflict). "
+        "Overrides the manifest's [qola] patches_dir. Defaults to "
+        "<QoLA repo>/patches/aiter; point at an empty directory to skip.",
     )
     build_p.add_argument(
         "--output-dir",
@@ -50,9 +68,56 @@ def main(argv: list[str] | None = None) -> int:
         "in [[modules]] still win. Defaults to 'pybind' if unset everywhere.",
     )
     build_p.add_argument(
+        "--skip-checkout",
+        action="store_true",
+        help="Skip the AITER checkout + patch step and build against "
+        "whatever is currently at --aiter-root. Use after a prior "
+        "`qola checkout`, or to build against a custom / locally-mutated "
+        "AITER source tree. --aiter-commit and --patches-dir are ignored "
+        "when this is set.",
+    )
+    build_p.add_argument(
         "--verbose",
         "-v",
         action="store_true",
+    )
+
+    checkout_p = sub.add_parser(
+        "checkout",
+        help="Clone/fetch AITER, check out the requested commit, and apply "
+        "patches — without building. Useful for downstream consumers that "
+        "want a patched AITER source tree to inspect or build against.",
+    )
+    checkout_p.add_argument(
+        "--manifest",
+        "-m",
+        default=None,
+        help="Optional TOML consumer manifest. When provided, [qola] "
+        "aiter_commit and [qola] patches_dir are read as fallbacks for the "
+        "corresponding flags.",
+    )
+    checkout_p.add_argument(
+        "--aiter-root",
+        "-a",
+        default=None,
+        help="Path to the AITER source tree root. Defaults to "
+        "<QoLA repo>/build/third_party/aiter (git-ignored, cloned on first use).",
+    )
+    checkout_p.add_argument(
+        "--aiter-commit",
+        default=None,
+        help="AITER git commit (full SHA, short SHA, tag, or branch) to "
+        "fetch and checkout. Overrides the manifest's [qola] aiter_commit. "
+        "When unset everywhere, resets to whatever is currently checked out "
+        "(only valid if the checkout already exists).",
+    )
+    checkout_p.add_argument(
+        "--patches-dir",
+        default=None,
+        help="Directory of *.patch files to apply on top of the AITER "
+        "checkout (lex order, git apply --3way, hard-fail on conflict). "
+        "Overrides the manifest's [qola] patches_dir. Defaults to "
+        "<QoLA repo>/patches/aiter; point at an empty directory to skip.",
     )
 
     args = parser.parse_args(argv)
@@ -71,6 +136,9 @@ def main(argv: list[str] | None = None) -> int:
             archs=archs,
             verbose=args.verbose,
             build_mode=args.mode,
+            aiter_commit=args.aiter_commit,
+            patches_dir=args.patches_dir,
+            skip_checkout=args.skip_checkout,
         )
         s = result["summary"]
         print(
@@ -82,6 +150,16 @@ def main(argv: list[str] | None = None) -> int:
                 if not r["success"]:
                     print(f"  FAILED: {r['md_name']}: {r['error']}")
             return 1
+    elif args.command == "checkout":
+        from .build_tools import checkout_aiter
+
+        path = checkout_aiter(
+            manifest_path=args.manifest,
+            aiter_root=args.aiter_root,
+            aiter_commit=args.aiter_commit,
+            patches_dir=args.patches_dir,
+        )
+        print(f"AITER ready at {path}")
     return 0
 
 
