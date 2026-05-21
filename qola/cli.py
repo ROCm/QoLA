@@ -68,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
         "in [[modules]] still win. Defaults to 'pybind' if unset everywhere.",
     )
     build_p.add_argument(
+        "--skip-checkout",
+        action="store_true",
+        help="Skip the AITER checkout + patch step and build against "
+        "whatever is currently at --aiter-root. Use after a prior "
+        "`qola checkout`, or to build against a custom / locally-mutated "
+        "AITER source tree. --aiter-commit and --patches-dir are ignored "
+        "when this is set.",
+    )
+    build_p.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -129,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
             build_mode=args.mode,
             aiter_commit=args.aiter_commit,
             patches_dir=args.patches_dir,
+            skip_checkout=args.skip_checkout,
         )
         s = result["summary"]
         print(

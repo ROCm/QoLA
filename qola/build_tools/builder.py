@@ -20,7 +20,7 @@ except ModuleNotFoundError:
 
 from .config import BuildSpec, load_manifest
 from .resolver import AiterNamespace, build_namespace, load_build_module_fn
-from .submodule import checkout_aiter
+from .submodule import checkout_aiter, default_aiter_root
 
 
 def build_kernels(
@@ -33,6 +33,7 @@ def build_kernels(
     build_mode: Optional[str] = None,
     aiter_commit: Optional[str] = None,
     patches_dir: Optional[str] = None,
+    skip_checkout: bool = False,
 ) -> dict[str, Any]:
     """Build AITER kernel modules from a consumer manifest.
 
@@ -68,6 +69,14 @@ def build_kernels(
         When provided, overrides the manifest's ``[qola] patches_dir``.
         Defaults to ``<QoLA repo>/patches/aiter``.  Pass an empty or
         non-existent directory to skip patching.
+    skip_checkout
+        When ``True``, skip the AITER checkout + patch step entirely and
+        build against whatever is currently at *aiter_root*.  Useful when
+        the user has already run ``qola checkout`` ahead of time, or is
+        building against a custom / locally-mutated AITER source tree.
+        ``aiter_commit`` and ``patches_dir`` are ignored in this mode;
+        the only requirement is that *aiter_root* points at an existing
+        git checkout.  Defaults to ``False``.
 
     Returns
     -------
@@ -84,12 +93,23 @@ def build_kernels(
     # Resolve + check out AITER (commit + patches) before any path resolution
     # that depends on the tree contents.  Same precedence as `qola checkout`:
     # CLI flag > manifest [qola] > default.
-    aiter_root = checkout_aiter(
-        manifest_path=manifest_path,
-        aiter_root=aiter_root,
-        aiter_commit=aiter_commit,
-        patches_dir=patches_dir,
-    )
+    if skip_checkout:
+        if aiter_root is None:
+            aiter_root = default_aiter_root()
+        aiter_root = str(Path(aiter_root).resolve())
+        if not (Path(aiter_root) / ".git").exists():
+            raise RuntimeError(
+                f"--skip-checkout was set but {aiter_root!r} is not a git "
+                f"checkout. Either drop --skip-checkout to let QoLA clone, "
+                f"or run `qola checkout` first."
+            )
+    else:
+        aiter_root = checkout_aiter(
+            manifest_path=manifest_path,
+            aiter_root=aiter_root,
+            aiter_commit=aiter_commit,
+            patches_dir=patches_dir,
+        )
 
     # Fall back to manifest's [build] architectures when not specified via CLI.
     if not archs:

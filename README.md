@@ -58,7 +58,29 @@ qola build \
 | `--output-dir` | Directory for build artifacts |
 | `--arch` | Target GPU architecture (repeatable, e.g. `--arch gfx950`) |
 | `--mode` | Build mode: `pybind` (default) or `cpp_itfs` |
+| `--skip-checkout` | Build against whatever is currently at `--aiter-root` instead of running the checkout + patch step. `--aiter-commit` and `--patches-dir` are ignored when set. See *Skipping the checkout step* below |
 | `--verbose` | Enable verbose build output |
+
+#### Skipping the checkout step
+
+By default, every `qola build` runs the wipe-and-reapply checkout: `git reset --hard` to the manifest's pinned commit, force-resync submodules, then reapply `patches/aiter/*.patch`. Pass `--skip-checkout` to opt out:
+
+```bash
+# Run checkout once...
+qola checkout --manifest example/te-manifest.toml
+
+# ...then iterate on builds without the prep cost (or risk of clobbering local edits)
+qola build --manifest example/te-manifest.toml --output-dir /tmp/qola-out --skip-checkout
+
+# Or build against a custom AITER tree you've prepared yourself
+qola build \
+  --manifest example/te-manifest.toml \
+  --output-dir /tmp/qola-out \
+  --aiter-root /path/to/my/aiter \
+  --skip-checkout
+```
+
+Hard-fails if `<aiter-root>/.git` doesn't exist — `--skip-checkout` requires a real checkout already in place.
 
 ### `qola checkout` — prepare an AITER source tree without building
 
