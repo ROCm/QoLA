@@ -57,3 +57,7 @@ hsa_subdirs  = ["fmha_v3_bwd"]
 add_blob_gen_cmd = [
     "{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_bwd --output_dir {{}}",
 ]
+# NOTE: the CK-free gfx1250 backward build (qola_manifest_gfx1250.toml) reuses
+# this same [libmha_bwd] entry — it is torch-free (mha_bwd.cu only). It drops
+# the CK `-d bwd` codegen via the manifest and sets ENABLE_CK=0 in the env, so
+# no separate registry entry is needed.

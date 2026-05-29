@@ -203,7 +203,47 @@ def _build_kernels_inner(
 # ------------------------------------------------------------------
 
 
+def _arch_sentinel_matches(blob_dir: Path, archs: List[str]) -> bool:
+    """Check whether *blob_dir* was last populated for *archs*.
+
+    Returns True iff a ``.qola_archs`` sentinel in *blob_dir* records the
+    same sorted arch list (or *archs* is empty — meaning we let AITER pick
+    the default and don't second-guess prior state).
+    """
+    if not archs:
+        return True
+    sentinel = blob_dir / ".qola_archs"
+    if not sentinel.is_file():
+        return False
+    return sentinel.read_text().strip() == ",".join(sorted(archs))
+
+
+def _wipe_stale_blobs(jit_build_dir: str, md_name: str, archs: List[str]) -> None:
+    """Wipe stale generated ``.cpp`` blobs when the target arch set changes.
+
+    CK's ``01_fmha/generate.py`` writes per-arch instances (``*_gfx9.cpp``,
+    ``*_gfx950.cpp``, …) into ``<jit>/build/<md_name>/blob/`` but never
+    cleans the directory. AITER's ``rename_cpp_to_cu`` then recursively
+    sweeps every ``.cpp`` it finds into the source list, so blobs from a
+    prior multi-arch build get compiled even after the manifest narrows
+    to a single arch. Sentinel-aware wipe avoids triggering a full
+    rebuild on incremental same-arch reconfigures.
+    """
+    blob_dir = Path(jit_build_dir) / "build" / md_name / "blob"
+    if not blob_dir.is_dir() or _arch_sentinel_matches(blob_dir, archs):
+        return
+    for blob in blob_dir.glob("*.cpp"):
+        blob.unlink()
+    (blob_dir / ".qola_archs").write_text(",".join(sorted(archs)))
+
+
 def _invoke_build(build_module_fn, spec: BuildSpec, verbose: bool) -> None:
+    jit_build_dir = os.environ.get("AITER_JIT_DIR")
+    gpu_archs_env = os.environ.get("GPU_ARCHS", "")
+    archs = [a.strip() for a in gpu_archs_env.split(";") if a.strip()]
+    if jit_build_dir:
+        _wipe_stale_blobs(jit_build_dir, spec.md_name, archs)
+
     prev_clang = os.environ.get("HIP_CLANG_PATH")
     if spec.hip_clang_path:
         os.environ["HIP_CLANG_PATH"] = spec.hip_clang_path
