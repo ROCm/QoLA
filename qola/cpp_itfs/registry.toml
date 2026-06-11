@@ -39,7 +39,7 @@ version_script = "qola/cpp_itfs/qola_exports.lds"
 drop_srcs    = []
 add_srcs     = ["qola/cpp_itfs/qola_mha_fwd.cu"]
 add_includes = ["qola/cpp_itfs"]
-hsa_subdirs  = ["fmha_v3_fwd"]
+hsa_subdirs  = ["fmha_v3_fwd", "fmha_fwd_bf16"]
 # FAV3_ON enables the asm v3 dispatch in mha_fwd.cu; FAV2_ON enables the
 # CK-tile fallback for configs v3 doesn't cover (non-bf16, hdim != 128/192,
 # non-gfx942/950, etc.).  Both are required for libmha_fwd to function.

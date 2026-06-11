@@ -175,6 +175,9 @@ def load_manifest(
 
         if mod_mode == "cpp_itfs":
             _apply_cpp_itfs(spec, name, namespace, eval_globals)
+            manifest_hsa = mod_entry.get("hsa_subdirs")
+            if manifest_hsa is not None:
+                spec.hsa_subdirs = manifest_hsa
         else:
             # For pybind mode, hsa_subdirs comes from the manifest entry,
             # falling back to the registry (which is authoritative for the
