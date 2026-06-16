@@ -12,4 +12,9 @@ float mha_bwd(const aiter::mha_bwd_args& args, const ck_tile::stream_config& str
     return ::aiter::mha_bwd(args, stream_config);
 }
 
+size_t mha_bwd_workspace_size(const fmha_bwd_traits& traits)
+{
+    return ::fmha_bwd_launcher(traits).workspace_size;
+}
+
 QOLA_NS_END
