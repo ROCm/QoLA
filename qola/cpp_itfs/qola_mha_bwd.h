@@ -22,12 +22,16 @@ QOLA_NS_BEGIN
 __attribute__((visibility("default")))
 float mha_bwd(const aiter::mha_bwd_args& args, const ck_tile::stream_config& stream_config);
 
+#if ENABLE_CK
 // Device workspace bytes the CK (v2) bwd path needs for its launcher metadata and
 // dq_acc accumulator, computed host-side from the traits (no kernel launch).
 // Exposed so ahead-of-time callers can reserve the buffer their workspace_alloc
 // callback carves from: the underlying fmha_bwd_launcher symbol is forced local by
 // QoLA's export script, so this query must be evaluated inside the QoLA library.
+// CK-free builds (ENABLE_CK==0, e.g. the gfx1250 v3-only tier) have no v2 launcher
+// and no fmha_bwd_traits, so the query is gated out alongside its dependencies.
 __attribute__((visibility("default")))
 size_t mha_bwd_workspace_size(const fmha_bwd_traits& traits);
+#endif
 
 QOLA_NS_END
