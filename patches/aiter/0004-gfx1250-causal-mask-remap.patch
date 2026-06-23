@@ -1,0 +1,32 @@
+Subject: fmha_v3_bwd: remap top-left causal to bottom-right on gfx1250
+
+gfx1250 ships only mask_type=2 (bottom-right causal) hd128 bf16 dqdkdv
+kernels; there is no mask_type=1 (top-left causal) kernel. TE's CAUSAL_MASK
+lowers to top-left (asm mt=1), so get_heuristic_kernel finds no matching
+dqdkdv kernel and fmha_v3_bwd returns -1 -- on the CK-free (ONLY_FAV3)
+gfx1250 build there is no v2 fallback, so backward fails outright.
+
+When seqlen_q == seqlen_k top-left and bottom-right causal are equivalent,
+so remap 1 -> 2 to hit the existing bottom-right kernels. Mirrors the
+existing gfx942 2 -> 1 remap directly above.
+
+diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
+index 99687209d..1010fca9f 100644
+--- a/csrc/cpp_itfs/mha_bwd.cu
++++ b/csrc/cpp_itfs/mha_bwd.cu
+@@ -469,6 +469,15 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+     {
+         mt = 1;  // bottom-right → top-left (equivalent when sq == sk)
+     }
++    // gfx1250 ships only mask_type=2 (bottom-right causal) dqdkdv kernels, no
++    // mask_type=1 (top-left causal). When seqlen_q == seqlen_k the two masks are
++    // mathematically equivalent, so convert 1 → 2 to hit the existing bottom-right
++    // kernels. Mirrors the gfx942 2 → 1 remap above.
++    // See config: hsa/gfx1250/fmha_v3_bwd/fmha_bwd_dqdkdv.csv
++    if(arch_id == "gfx1250" && mt == 1 && a.seqlen_q == a.seqlen_k)
++    {
++        mt = 2;  // top-left → bottom-right (equivalent when sq == sk)
++    }
+ 
+     auto [pre_kernel, dqdkdv_kernel, post_kernel] = get_heuristic_kernel(a.data_type,
+                                                                          arch_id,
