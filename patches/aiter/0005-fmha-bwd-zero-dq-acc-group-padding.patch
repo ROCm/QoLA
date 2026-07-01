@@ -1,0 +1,18 @@
+diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
+--- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
++++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
+@@ -162,7 +162,11 @@
+         // non-deterministic and persistent kernels use atomic-add to write dq
+         if constexpr(kUsePersistent || !kIsDeterministic)
+             return true;
+-        // Some block may be skipped with causal mask and dq are not set to zeros
+-        // In these cases we need to zero out it first
+-        return kHasMask;
++        // Some block may be skipped with causal mask and dq are not set to zeros
++        // In these cases we need to zero out it first. Group mode is equivalent:
++        // variable-length / padded sequences leave their tail kv-tiles unwritten
++        // (the kernel is "nmask" - padding is carried via seqlens, not a mask), so
++        // those dq_acc splits must be zeroed too, otherwise dQ is not bitwise
++        // reproducible.
++        return kHasMask || kIsGroupMode;
+     }
