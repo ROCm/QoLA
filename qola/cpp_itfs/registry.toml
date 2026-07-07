@@ -57,3 +57,15 @@ hsa_subdirs  = ["fmha_v3_bwd"]
 add_blob_gen_cmd = [
     "{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_bwd --output_dir {{}}",
 ]
+
+[libgemm_a4w4_blockscale]
+drop_srcs    = []
+add_srcs     = ["qola/cpp_itfs/qola_gemm_a4w4_blockscale.cu"]
+add_includes = ["qola/cpp_itfs"]
+# CK blockscale path: kernels are generated (gen_instances.py), no HSA blobs.
+
+[libgemm_a4w4_asm]
+drop_srcs    = []
+add_srcs     = ["qola/cpp_itfs/qola_gemm_a4w4_asm.cu"]
+add_includes = ["qola/cpp_itfs"]
+hsa_subdirs  = ["f4gemm"]
