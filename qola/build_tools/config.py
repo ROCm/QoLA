@@ -37,6 +37,7 @@ class BuildSpec:
     hipify: bool = False
     hip_clang_path: Optional[str] = None
     hsa_subdirs: List[str] = field(default_factory=list)
+    third_party: List[str] = field(default_factory=list)
 
 
 # Defaults matching core.py's d_opt_build_args (line 712, commit 33f2e6af)
@@ -393,6 +394,7 @@ def _eval_entry(
         torch_exclude=bool(resolved.get("torch_exclude", False)),
         hipify=bool(resolved.get("hipify", False)),
         hip_clang_path=resolved.get("hip_clang_path"),
+        third_party=resolved.get("third_party", []),
     )
 
 

@@ -240,6 +240,7 @@ def _invoke_build(build_module_fn, spec: BuildSpec, verbose: bool) -> None:
             is_python_module=spec.is_python_module,
             is_standalone=spec.is_standalone,
             torch_exclude=spec.torch_exclude,
+            third_party=spec.third_party,
             hipify=spec.hipify,
         )
     finally:
@@ -250,7 +251,13 @@ def _invoke_build(build_module_fn, spec: BuildSpec, verbose: bool) -> None:
                 os.environ.pop("HIP_CLANG_PATH", None)
 
 
-_PUBLIC_HEADERS = ("qola_common.h", "qola_mha_fwd.h", "qola_mha_bwd.h")
+_PUBLIC_HEADERS = (
+    "qola_common.h",
+    "qola_mha_fwd.h",
+    "qola_mha_bwd.h",
+    "qola_gemm_a4w4_blockscale.h",
+    "qola_gemm_a4w4_asm.h",
+)
 
 
 def _export_public_headers(output_dir: str, namespace: str) -> None:
