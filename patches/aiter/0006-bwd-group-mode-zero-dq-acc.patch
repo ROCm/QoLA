@@ -1,0 +1,32 @@
+Subject: fmha bwd: zero dq_acc for group/varlen deterministic mode
+
+NeedsZeroDqAcc() gates whether the launcher zeroes the dq_acc workspace
+before the backward kernels run. For non-persistent deterministic kernels it
+only returned kHasMask, so group (varlen) mode with a non-causal padding mask
+(the nmask kernel, kHasMask=false) left dq_acc unzeroed.
+
+In group mode the deterministic reduction reads dq_acc split slots for
+padded/masked KV that the main kernel never writes, so an unzeroed buffer
+makes dq non-reproducible (and can yield NaN). Return kHasMask || kIsGroupMode
+so group mode is always zeroed -- the same path that already covers causal
+group mode via kHasMask.
+
+diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
+--- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
++++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
+@@ -222,9 +222,12 @@
+         // non-deterministic and persistent kernels use atomic-add to write dq
+         if constexpr(kUsePersistent || !kIsDeterministic)
+             return true;
+-        // Some block may be skipped with causal mask and dq are not set to zeros
+-        // In these cases we need to zero out it first
+-        return kHasMask;
++        // Non-persistent deterministic uses `set` (not atomic-add), but some dq_acc
++        // split slots are left unwritten and are still read during the reduction:
++        //  - causal mask skips tiles (kHasMask), and
++        //  - group/varlen mode leaves padded-KV splits untouched (kIsGroupMode).
++        // Zero those first so the reduction doesn't consume uninitialized memory.
++        return kHasMask || kIsGroupMode;
+     }
+ 
+     // Upper bound on PrepareWorkspaceHost's size, computable without seqstart so
