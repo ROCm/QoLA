@@ -12,6 +12,8 @@ top of that commit on every build.
 
 from __future__ import annotations
 
+import hashlib
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -47,6 +49,7 @@ def checkout_aiter(
     aiter_root: Optional[str] = None,
     aiter_commit: Optional[str] = None,
     patches_dir: Optional[str] = None,
+    force: bool = False,
 ) -> str:
     """Resolve the AITER checkout + patch step from manifest/CLI inputs.
 
@@ -84,7 +87,7 @@ def checkout_aiter(
         or default_patches_dir()
     )
 
-    ensure_aiter_commit(aiter_root, effective_commit, effective_patches_dir)
+    ensure_aiter_commit(aiter_root, effective_commit, effective_patches_dir, force=force)
     return aiter_root
 
 
@@ -92,11 +95,12 @@ def ensure_aiter_commit(
     aiter_root: str,
     commit: Optional[str],
     patches_dir: Optional[str] = None,
+    force: bool = False,
 ) -> None:
     """Ensure *aiter_root* is a clean checkout of *commit* with patches applied.
 
     Clones ``ROCm/aiter`` into *aiter_root* if no git tree exists there.
-    Then on every call (regardless of current HEAD or working-tree state):
+    When the tree is not already in the requested state, the resync runs:
 
     1. Fetches *commit* from origin if it isn't already present locally.
     2. ``git reset --hard`` to *commit* — wipes any local edits.
@@ -106,13 +110,29 @@ def ensure_aiter_commit(
        order via ``git apply --3way``. The first failing patch aborts the
        build with a pointer at the offending file.
 
-    Local edits to the AITER checkout never survive a build — patches are
-    the only sanctioned way to carry deltas. To skip the patch step,
-    point *patches_dir* at an empty directory or ``/dev/null``.
+    Idempotency
+    -----------
+    Steps 2-4 rewrite working-tree files, which bumps their mtimes even when
+    the resulting content is identical. That defeats incremental rebuilds for
+    every downstream consumer: a reconfigure (e.g. every ``pip install``)
+    would re-touch the patched AITER/CK headers and force recompiles. To
+    avoid that, a stamp recording ``(target commit + patch-set fingerprint)``
+    is written under the AITER git dir after a successful resync. On later
+    calls, if ``HEAD`` already equals *target* and the stamp matches, the
+    resync is skipped entirely so no files are touched.
+
+    The stamp is keyed on the resolved commit and the content of every patch,
+    so bumping the manifest pin or editing/adding/removing a patch triggers a
+    full resync. Pass ``force=True`` (or set ``QOLA_FORCE_AITER_CHECKOUT=1``)
+    to bypass the stamp and force the destructive resync — the only way to
+    clear out-of-band local edits to the checkout.
+
+    Local edits to the AITER checkout are not sanctioned — patches are the
+    only supported way to carry deltas. To skip the patch step, point
+    *patches_dir* at an empty directory or ``/dev/null``.
 
     *commit* may be ``None`` only when the checkout already exists; in
-    that case the function still resets to the current HEAD (clearing
-    any dirty state) and reapplies patches.
+    that case the function targets the current HEAD.
     """
     root = Path(aiter_root)
     is_checkout = (root / ".git").exists()
@@ -131,13 +151,73 @@ def ensure_aiter_commit(
     else:
         target = _resolve_commit(aiter_root, commit)
 
+    force = force or os.environ.get("QOLA_FORCE_AITER_CHECKOUT", "0") not in ("", "0")
+
+    # Skip the destructive (mtime-bumping) resync when the tree is already at
+    # `target` with this exact patch set applied. See the docstring's
+    # "Idempotency" note for why this matters for incremental rebuilds.
+    stamp_path = _checkout_stamp_path(aiter_root)
+    desired_key = _checkout_key(target, patches_dir)
     head = _git(aiter_root, "rev-parse", "HEAD").strip()
+    if not force and head == target and _read_stamp(stamp_path) == desired_key:
+        return
+
     if head != target:
         print(f"[QoLA] Checking out AITER {target} (was {head})")
     _git(aiter_root, "reset", "--hard", target)
     _git(aiter_root, "submodule", "update", "--init", "--recursive", "--force")
 
     _apply_patches(aiter_root, patches_dir)
+
+    _write_stamp(stamp_path, desired_key)
+
+
+def _checkout_stamp_path(aiter_root: str) -> Path:
+    """Return the path of the checkout stamp inside the AITER git dir.
+
+    The stamp lives under the git dir (not the working tree) so it is never
+    tracked, patched, or clobbered by ``git reset``/``git submodule update``.
+    ``git rev-parse --absolute-git-dir`` resolves both a real ``.git``
+    directory (fresh clone) and a ``.git`` file pointing elsewhere (worktree
+    or submodule-style checkout).
+    """
+    git_dir = _git(aiter_root, "rev-parse", "--absolute-git-dir").strip()
+    return Path(git_dir) / "qola_checkout.stamp"
+
+
+def _checkout_key(target: str, patches_dir: Optional[str]) -> str:
+    """Fingerprint the desired checkout state: target commit + patch contents.
+
+    Any change to the resolved commit or to the name/content of any applied
+    patch changes the digest, which invalidates the stamp and forces a resync.
+    """
+    h = hashlib.sha256()
+    h.update(target.encode())
+    if patches_dir is not None:
+        patches_root = Path(patches_dir)
+        if patches_root.is_dir():
+            for patch in sorted(patches_root.glob("*.patch")):
+                h.update(b"\0")
+                h.update(patch.name.encode())
+                h.update(b"\0")
+                h.update(patch.read_bytes())
+    return h.hexdigest()
+
+
+def _read_stamp(stamp_path: Path) -> Optional[str]:
+    """Return the stored checkout key, or ``None`` if the stamp is absent."""
+    try:
+        return stamp_path.read_text().strip()
+    except OSError:
+        return None
+
+
+def _write_stamp(stamp_path: Path, key: str) -> None:
+    """Record the checkout key. Non-fatal on failure (worst case: resync next time)."""
+    try:
+        stamp_path.write_text(key + "\n")
+    except OSError:
+        pass
 
 
 def _apply_patches(aiter_root: str, patches_dir: Optional[str]) -> None:
