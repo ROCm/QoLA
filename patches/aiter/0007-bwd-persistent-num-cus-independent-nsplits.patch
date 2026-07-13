@@ -1,0 +1,97 @@
+Subject: fmha bwd: make persistent deterministic nsplits num_cus-independent
+
+The deterministic non-group (persistent) backward derived its dq_acc split
+count from get_num_cus(): nsplits was a compressed function of the CU count in
+PrepareWorkspaceHost, PrepareWorkspaceDevice, and GetWorkspaceDeviceSizeUpperBound,
+while the persistent kernel writes split index
+  i_split = ceil((job % jobs_per_head) / jobs_per_worker)
+with jobs_per_worker = ceil(total_jobs / gridDim.x).
+
+This is only self-consistent when the num_cus used to compute nsplits exactly
+matches gridDim.x at launch. get_num_cus() queries the current device's
+multiProcessorCount, which differs across gfx archs (e.g. gfx942 vs gfx950) and
+can be sampled at a different time/device than the launch grid; when it does not
+match, i_split reaches or exceeds nsplits and the kernel writes/reduces past the
+dq_acc split region -> silent corruption (observed as zeroed results on gfx942
+deterministic backward, batch/BSHD mode).
+
+Use the num_cus-independent upper bound jobs_per_head = ceil(seqlen_k / kN0) for
+nsplits at all three sites. It always bounds the kernel's max i_split
+(< jobs_per_head for any worker count), unused splits stay zero (NeedsZeroDqAcc()
+is true for the persistent kernel, so the reduction is unaffected), and it matches
+the seqlen-based dq_acc floor TE already reserves -- so no extra workspace.
+
+diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
+--- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
++++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
+@@ -140,16 +140,17 @@
+         }
+         else // deterministic non-group mode (kUsePersistent)
+         {
+-            const index_t dqdqkdv_workers = get_num_cus();
+-            const index_t jobs_per_head   = integer_divide_ceil(seqlen_k, kN0);
+-            const index_t total_jobs      = batch_size * nhead_q * jobs_per_head;
+-            const index_t jobs_per_worker = integer_divide_ceil(total_jobs, dqdqkdv_workers);
+-            if(jobs_per_head % jobs_per_worker == 0)
+-                nsplits[0] = jobs_per_head / jobs_per_worker;
+-            else if(jobs_per_worker % jobs_per_head == 0)
+-                nsplits[0] = 1;
+-            else
+-                nsplits[0] = 1 + integer_divide_ceil(jobs_per_head - 1, jobs_per_worker);
++            // nsplits must upper-bound the largest dq_acc split index the persistent kernel
++            // writes: i_split = ceil((job % jobs_per_head) / jobs_per_worker), always
++            // < jobs_per_head for any worker count. Deriving nsplits from num_cus here is only
++            // safe when this num_cus exactly equals gridDim.x at launch; if they differ (CU
++            // count queried at a different time/device than launch, or the compressed formula
++            // off-by-ones for a given count) i_split can reach nsplits and the kernel
++            // writes/reduces past the dq_acc split region -> corruption. Use the
++            // num_cus-independent bound jobs_per_head. Unused splits stay zero (NeedsZeroDqAcc()
++            // is true for the persistent kernel) so the reduction is unaffected; the extra
++            // splits only occupy dq_acc bytes that are already floored to this size.
++            nsplits[0] = integer_divide_ceil(seqlen_k, kN0);
+             return sizeof(AccDataType) * static_cast<long_index_t>(batch_size) * nhead_q *
+                    nsplits[0] * seqlen_q * hdim_q;
+         }
+@@ -202,16 +203,11 @@
+         }
+         else // deterministic non-group mode (kUsePersistent)
+         {
+-            const index_t dqdqkdv_workers = num_cus;
+-            const index_t jobs_per_head   = integer_divide_ceil(seqlen_k, kN0);
+-            const index_t total_jobs      = batch_size * nhead_q * jobs_per_head;
+-            const index_t jobs_per_worker = integer_divide_ceil(total_jobs, dqdqkdv_workers);
+-            if(jobs_per_head % jobs_per_worker == 0)
+-                nsplits[0] = jobs_per_head / jobs_per_worker;
+-            else if(jobs_per_worker % jobs_per_head == 0)
+-                nsplits[0] = 1;
+-            else
+-                nsplits[0] = 1 + integer_divide_ceil(jobs_per_head - 1, jobs_per_worker);
++            // Match PrepareWorkspaceHost: use the num_cus-independent upper bound jobs_per_head
++            // so nsplits always bounds the kernel's max i_split, even if num_cus differs from
++            // gridDim.x at launch (see the host-side comment for the failure mode).
++            (void)num_cus;
++            nsplits[0] = integer_divide_ceil(seqlen_k, kN0);
+         }
+     }
+ 
+@@ -253,16 +249,10 @@
+             }
+             else // persistent
+             {
+-                const index_t dqdqkdv_workers = get_num_cus();
+-                const index_t jobs_per_head   = integer_divide_ceil(max_seqlen_k, kN0);
+-                const index_t total_jobs      = max_batch * nhead_q * jobs_per_head;
+-                const index_t jobs_per_worker = integer_divide_ceil(total_jobs, dqdqkdv_workers);
+-                if(jobs_per_head % jobs_per_worker == 0)
+-                    nsplits_factor = jobs_per_head / jobs_per_worker;
+-                else if(jobs_per_worker % jobs_per_head == 0)
+-                    nsplits_factor = 1;
+-                else
+-                    nsplits_factor = 1 + integer_divide_ceil(jobs_per_head - 1, jobs_per_worker);
++                // Size for the num_cus-independent split bound used by PrepareWorkspace*
++                // (jobs_per_head), so the device workspace is never under-sized when the
++                // launch-time CU count differs from the count seen here.
++                nsplits_factor = integer_divide_ceil(max_seqlen_k, kN0);
+             }
+         }
+ 
