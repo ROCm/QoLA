@@ -12,7 +12,7 @@ persistent-path zeroing.
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
 --- a/csrc/cpp_itfs/mha_bwd.cu
 +++ b/csrc/cpp_itfs/mha_bwd.cu
-@@ -163,5 +163,12 @@
+@@ -163,6 +163,7 @@
 
      fmha_bwd_launcher launcher(traits);
 -    void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/false);
