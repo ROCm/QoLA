@@ -1,0 +1,23 @@
+Subject: fmha bwd: zero dq_acc workspace for deterministic group/varlen mode
+
+The ck_tile launcher only zeroes the dq_acc workspace when its compile-time
+NeedsZeroDqAcc() gate is set. For deterministic group/varlen mode that gate does
+not fire for every mask/layout (non-causal padding in particular), so the
+split-accumulator slots for padded/masked KV are left uninitialized and the
+convert_dq reduction reads stale memory -> non-deterministic dq. Request
+zero-init from the caller-provided allocator for that case so the whole
+workspace starts zeroed. Batch mode is already covered by the launcher's own
+persistent-path zeroing.
+
+diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
+--- a/csrc/cpp_itfs/mha_bwd.cu
++++ b/csrc/cpp_itfs/mha_bwd.cu
+@@ -163,5 +163,12 @@
+
+     fmha_bwd_launcher launcher(traits);
+-    void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/false);
++    const bool zero_ws = a.is_deterministic && a.is_group_mode;
++    void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/zero_ws);
+
+     // Enqueues the workspace prep on the caller's stream: dq_acc zero (if needed)
+     // plus an on-device kernel that writes the nsplits[]/offsets[] metadata. Fully
