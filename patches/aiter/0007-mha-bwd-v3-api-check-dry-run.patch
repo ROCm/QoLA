@@ -1,0 +1,55 @@
+Subject: mha_bwd: make v3_api_check a pure, side-effect-free dry-run probe
+
+The v3_api_check flag is meant to answer "would the v3 ASM backward run
+for this config?" (return 1 = yes, -1 = no) WITHOUT launching any kernel
+or touching the driver/filesystem. The fwd path (mha_fwd.cu) already
+honors this; the bwd path did not.
+
+Two fixes to csrc/cpp_itfs/mha_bwd.cu:
+
+  1. mha_bwd(): when the asm path returns -1 the function falls through to
+     the v2 CK backward. A probe on a v3-unsupported config would therefore
+     allocate a workspace and run a full v2 backward, clobbering dq/dk/dv
+     instead of reporting -1. Return -1 immediately under v3_api_check so
+     the probe stays side-effect-free (mirrors the fwd path).
+
+  2. fmha_v3_bwd(): the `if(a.v3_api_check) return 1;` sat after all three
+     ASM modules were loaded (AiterAsmKernel construction + .co file loads).
+     Move it up to the config-availability point (right after kernel-name
+     resolution), matching the fwd path which returns before any module
+     load.
+
+diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
+index a57df7c2d..a0bed81de 100644
+--- a/csrc/cpp_itfs/mha_bwd.cu
++++ b/csrc/cpp_itfs/mha_bwd.cu
+@@ -135,6 +135,9 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+     if(asm_ret != -1)
+         return asm_ret;
+ 
++    if(a.v3_api_check)
++        return -1;
++
+     if(a.is_group_mode && (a.seqstart_q_ptr == nullptr || a.seqstart_k_ptr == nullptr))
+     {
+         AITER_LOG_ERROR("mha_bwd: group mode requires seqstart_q_ptr and seqstart_k_ptr");
+@@ -377,6 +380,9 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+         return -1;
+     }
+ 
++    if(a.v3_api_check)
++        return 1;
++
+     int ts_odo;
+     int ts_kv;
+     int ts_dq;
+@@ -438,9 +444,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+         }
+     }
+ 
+-    if(a.v3_api_check)
+-        return 1;
+-
+     fmha_bwd_odo_args odo_args;
+ 
+     odo_args.ptr_o           = a.o_ptr;
