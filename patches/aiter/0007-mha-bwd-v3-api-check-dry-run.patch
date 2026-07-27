@@ -20,10 +20,10 @@ Two fixes to csrc/cpp_itfs/mha_bwd.cu:
      load.
 
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
-index a57df7c2d..a0bed81de 100644
+index ecfe92ba4..1f55c9b60 100644
 --- a/csrc/cpp_itfs/mha_bwd.cu
 +++ b/csrc/cpp_itfs/mha_bwd.cu
-@@ -135,6 +135,9 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -245,6 +245,9 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
      if(asm_ret != -1)
          return asm_ret;
  
@@ -33,7 +33,7 @@ index a57df7c2d..a0bed81de 100644
      if(a.is_group_mode && (a.seqstart_q_ptr == nullptr || a.seqstart_k_ptr == nullptr))
      {
          AITER_LOG_ERROR("mha_bwd: group mode requires seqstart_q_ptr and seqstart_k_ptr");
-@@ -377,6 +380,9 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -491,6 +494,9 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
          return -1;
      }
  
@@ -43,13 +43,13 @@ index a57df7c2d..a0bed81de 100644
      int ts_odo;
      int ts_kv;
      int ts_dq;
-@@ -438,9 +444,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -553,9 +559,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
          }
      }
  
 -    if(a.v3_api_check)
 -        return 1;
 -
-     fmha_bwd_odo_args odo_args;
+     const auto odo_args  = make_fmha_bwd_odo_logical_args(a);
+     auto odo_arg_storage = pack_fmha_bwd_odo_args(odo_args, compact_odo_args);
  
-     odo_args.ptr_o           = a.o_ptr;
