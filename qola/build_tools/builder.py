@@ -34,6 +34,7 @@ def build_kernels(
     aiter_commit: Optional[str] = None,
     patches_dir: Optional[str] = None,
     skip_checkout: bool = False,
+    groups: Optional[List[str]] = None,
 ) -> dict[str, Any]:
     """Build AITER kernel modules from a consumer manifest.
 
@@ -77,6 +78,16 @@ def build_kernels(
         ``aiter_commit`` and ``patches_dir`` are ignored in this mode;
         the only requirement is that *aiter_root* points at an existing
         git checkout.  Defaults to ``False``.
+    groups
+        Restrict the build to ``[[modules]]`` entries carrying one of these
+        ``group`` values.  Lets one manifest -- a single AITER commit and
+        patch set -- serve several consumers that each build their own
+        subset.  When ``None``, falls back to the ``QOLA_BUILD_GROUPS``
+        environment variable (a ``;``-separated list); when that is unset
+        too, every module in the manifest is built.
+
+        The environment fallback exists for callers that invoke ``qola
+        build`` through an intermediary which does not forward ``--group``.
 
     Returns
     -------
@@ -85,6 +96,13 @@ def build_kernels(
     """
     output_dir = str(Path(output_dir).resolve())
     manifest_path = str(Path(manifest_path).resolve())
+
+    if groups is None:
+        env_groups = os.environ.get("QOLA_BUILD_GROUPS", "")
+        parsed = [g.strip() for g in env_groups.replace(",", ";").split(";") if g.strip()]
+        if parsed:
+            groups = parsed
+            print(f"[QoLA] Restricting build to group(s) {groups} (QOLA_BUILD_GROUPS)")
 
     # Save env vars we'll override so we can restore them on exit.
     prev_gpu_archs = os.environ.get("GPU_ARCHS")
@@ -127,7 +145,7 @@ def build_kernels(
     try:
         return _build_kernels_inner(
             aiter_root, output_dir, manifest_path, archs,
-            jit_build_dir, verbose, build_mode,
+            jit_build_dir, verbose, build_mode, groups,
         )
     finally:
         _restore_env("GPU_ARCHS", prev_gpu_archs)
@@ -150,12 +168,13 @@ def _build_kernels_inner(
     jit_build_dir: str,
     verbose: bool,
     build_mode: str,
+    groups: Optional[List[str]] = None,
 ) -> dict[str, Any]:
     # 1. Resolve namespace
     ns = build_namespace(aiter_root)
 
     # 2. Parse manifest
-    specs = load_manifest(manifest_path, ns, build_mode=build_mode)
+    specs = load_manifest(manifest_path, ns, build_mode=build_mode, groups=groups)
 
     # 3. Load build_module from AITER
     build_module = load_build_module_fn(aiter_root)
@@ -295,8 +314,7 @@ _PUBLIC_HEADERS = (
     "qola_common.h",
     "qola_mha_fwd.h",
     "qola_mha_bwd.h",
-    "qola_gemm_a4w4_blockscale.h",
-    "qola_gemm_a4w4_asm.h",
+    "qola_gemm_a4w4.h",
 )
 
 

@@ -78,6 +78,7 @@ def load_manifest(
     manifest_path: str,
     ns: AiterNamespace,
     build_mode: Optional[str] = None,
+    groups: Optional[List[str]] = None,
 ) -> List[BuildSpec]:
     """Parse a TOML manifest and return resolved :class:`BuildSpec` instances.
 
@@ -94,6 +95,12 @@ def load_manifest(
         Per-module ``mode`` entries in ``[[modules]]`` still take final
         precedence (most specific scope).  When ``None`` and unset in the
         manifest, defaults to ``"pybind"``.
+    groups
+        When provided, restricts the build to ``[[modules]]`` entries whose
+        ``group`` is in this list.  This lets a single manifest -- one AITER
+        commit, one patch set, one checkout -- serve several independent
+        consumers that each build only their own subset of kernels.  When
+        ``None``, every module in the manifest is built.
 
     Manifest schema::
 
@@ -107,6 +114,7 @@ def load_manifest(
 
         [[modules]]
         name = "libmha_fwd"
+        group = "ck_fused_attn"           # optional; selectable via --group
         mode = "cpp_itfs"                 # optional per-module override
         receipt = 700                     # optional CK codegen filter (default: whatever
                                           # optCompilerConfig.json specifies, typically 600)
@@ -141,15 +149,45 @@ def load_manifest(
     gpu_archs_env = os.getenv("GPU_ARCHS", "")
     resolved_archs = [a.strip() for a in gpu_archs_env.split(";") if a.strip()]
 
+    # Restrict to the requested module groups, if any.  Ungrouped modules are
+    # excluded when filtering is active: a manifest shared by several
+    # consumers should say explicitly who owns each module.
+    all_modules = manifest.get("modules", [])
+    if groups is not None:
+        wanted = set(groups)
+        declared = {m["group"] for m in all_modules if "group" in m}
+        unknown = wanted - declared
+        if unknown:
+            raise ValueError(
+                f"Unknown module group(s) {sorted(unknown)} for manifest "
+                f"{manifest_path}. Declared groups: {sorted(declared) or '(none)'}."
+            )
+        selected_modules = [m for m in all_modules if m.get("group") in wanted]
+        if not selected_modules:
+            raise ValueError(
+                f"No modules selected for group(s) {sorted(wanted)} in "
+                f"manifest {manifest_path}."
+            )
+    else:
+        selected_modules = all_modules
+
     specs: List[BuildSpec] = []
     fwd_section = manifest.get("mha_fwd_variants", [])
-    module_names = {m["name"] for m in manifest.get("modules", [])}
+    module_names = {m["name"] for m in selected_modules}
 
     has_fwd_variants = bool(fwd_section)
     has_static_fwd = "libmha_fwd" in module_names
 
     # Keys consumed by load_manifest before passing to _resolve_static_module.
-    _MANIFEST_KEYS = {"name", "mode", "drop_srcs", "drop_directions", "hsa_subdirs", "receipt"}
+    _MANIFEST_KEYS = {
+        "name",
+        "group",
+        "mode",
+        "drop_srcs",
+        "drop_directions",
+        "hsa_subdirs",
+        "receipt",
+    }
 
     # --- static modules ---
     # NOTE: Variant filtering is NOT applied to static libmha_fwd /
@@ -157,7 +195,7 @@ def load_manifest(
     # files and the dispatch API file (fmha_*_api.cpp) on every call.
     # Running it N times with different --filter patterns overwrites the
     # API dispatch, leaving only the last filter's branches.
-    for mod_entry in manifest.get("modules", []):
+    for mod_entry in selected_modules:
         name = mod_entry["name"]
         mod_mode = mod_entry.get("mode", global_mode)
         drop_srcs = set(mod_entry.get("drop_srcs", []))
@@ -447,7 +485,6 @@ def _eval_entry(
         third_party=list(resolved.get("third_party", [])),
         hipify=bool(resolved.get("hipify", False)),
         hip_clang_path=resolved.get("hip_clang_path"),
-        third_party=resolved.get("third_party", []),
     )
 
 
