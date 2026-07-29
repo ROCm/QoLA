@@ -50,6 +50,33 @@ inline aiter_tensor_t to_aiter_tensor(const qola_tensor_t& d)
     return t;
 }
 
+// AITER's AITER_CHECK routes through aiter_detail::check_fail, which calls
+// std::abort() unless the thread-local g_aiter_can_throw is set.  AITER's own
+// C entry points flip it for the duration of a call (see
+// csrc/include/aiter_ctypes_error.h) which is why the ASM path already reports
+// failures as a status code; the CK blockscale path is a plain C++ function
+// and has no such wrapper.  QoLA's C ABI promises status codes rather than
+// process death, so it must establish the same guarantee itself.
+//
+// Save/restore rather than unconditionally clearing, so nesting inside an
+// AITER entry point that already set the flag is harmless.
+class CanThrowGuard
+{
+    public:
+    CanThrowGuard()
+        : prev_(aiter_detail::g_aiter_can_throw)
+    {
+        aiter_detail::g_aiter_can_throw = true;
+    }
+    ~CanThrowGuard() { aiter_detail::g_aiter_can_throw = prev_; }
+
+    CanThrowGuard(const CanThrowGuard&)            = delete;
+    CanThrowGuard& operator=(const CanThrowGuard&) = delete;
+
+    private:
+    bool prev_;
+};
+
 inline void set_error(char* err_buf, size_t err_buf_size, const char* msg)
 {
     if(err_buf == nullptr || err_buf_size == 0)
@@ -65,6 +92,7 @@ inline void set_error(char* err_buf, size_t err_buf_size, const char* msg)
 template <typename Fn>
 inline int guarded(char* err_buf, size_t err_buf_size, Fn&& fn)
 {
+    CanThrowGuard can_throw;
     try
     {
         fn();
