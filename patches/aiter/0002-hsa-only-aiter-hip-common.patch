@@ -15,13 +15,13 @@ QoLA always builds AITER with -DAITER_EMBEDDED_HSA_HEADER and embeds the
    macro.
 
 diff --git a/csrc/include/aiter_hip_common.h b/csrc/include/aiter_hip_common.h
-index 7790e3d97..570ae7d9e 100644
+index e4c9641af..697364606 100644
 --- a/csrc/include/aiter_hip_common.h
 +++ b/csrc/include/aiter_hip_common.h
-@@ -246,6 +246,13 @@ class AiterAsmKernelFast
+@@ -290,6 +290,13 @@ class AiterAsmKernelFast
+     };
  };
-
-
+ 
 +// AiterAsmKernel resolves and loads ASM kernel blobs at runtime.  In the
 +// QoLA build flow the blobs are embedded into the binary at compile time
 +// via -DAITER_EMBEDDED_HSA_HEADER, so this class is only meaningful when
@@ -29,13 +29,13 @@ index 7790e3d97..570ae7d9e 100644
 +// touch aiter::mha_fwd_args) can include this header without the
 +// embedded blobs and skip past the class entirely.
 +#ifdef AITER_EMBEDDED_HSA_HEADER
- class AiterAsmKernel: private AiterAsmKernelFast
+ class AiterAsmKernel : private AiterAsmKernelFast
  {
      private:
-@@ -330,44 +337,23 @@ class AiterAsmKernel: private AiterAsmKernelFast
+@@ -380,44 +387,23 @@ class AiterAsmKernel : private AiterAsmKernelFast
          }
      }
-
+ 
 +    // The on-disk AITER_ASM_DIR path is intentionally disabled so a stray
 +    // env var cannot make a QoLA-built consumer silently load .co files
 +    // from disk.  Both AITER_EMBEDDED_HSA_HEADER and AITER_EMBEDDED_HSA_MAP
@@ -89,13 +89,13 @@ index 7790e3d97..570ae7d9e 100644
 +        AITER_LOG_INFO("LoadKernel: " << kernel_name << " hsaco: [embedded] " << fname);
 +        return hasco_obj->second.data();
      }
-
+ 
      public:
-@@ -378,6 +364,7 @@ class AiterAsmKernel: private AiterAsmKernelFast
-
+@@ -428,6 +414,7 @@ class AiterAsmKernel : private AiterAsmKernelFast
+ 
      using AiterAsmKernelFast::launch_kernel;
  };
 +#endif // AITER_EMBEDDED_HSA_HEADER
-
-
+ 
  } // namespace
+ 

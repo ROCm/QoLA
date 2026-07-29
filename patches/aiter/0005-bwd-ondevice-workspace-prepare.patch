@@ -1,8 +1,8 @@
 diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
-index 0a71ef677..b862bc32f 100644
+index dae78e243..95bc49379 100644
 --- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
 +++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
-@@ -196,6 +196,26 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
+@@ -221,6 +221,26 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
          cpu_ws, batch_size, hdim_q, nhead_q, seqlen_q, seqlen_k, seqstart_qs, seqstart_ks);
  }}
  
@@ -30,7 +30,7 @@ index 0a71ef677..b862bc32f 100644
  bool fmha_bwd_dq_dk_dv_needs_zero_dq_acc_<dq_dk_dv_trait_{F_idx}, {F_arch.tag}>()
  {{
 diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_bwd.hpp b/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_bwd.hpp
-index ef07978cc..5a3dd651d 100644
+index 93e770a0c..5a3dd651d 100644
 --- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_bwd.hpp
 +++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_bwd.hpp
 @@ -29,6 +29,20 @@ using PrepareWorkspaceHostFunc = size_t (*)(void*,                   // host_ws
@@ -182,7 +182,7 @@ index ef07978cc..5a3dd651d 100644
          if(host_ws_size_ == 0)
          {
              if(needs_zero_dq_acc_ && workspace_size > 0)
-@@ -703,91 +662,29 @@ struct fmha_bwd_launcher
+@@ -703,93 +662,29 @@ struct fmha_bwd_launcher
              return;
          }
  
@@ -192,6 +192,8 @@ index ef07978cc..5a3dd651d 100644
 -
 -        // Allocate pinned host staging first: if it throws we haven't issued any
 -        // stream work yet, leaving the workspace cleanly un-prepared.
+-        // 16-align each section: pin_w stores alignas(16) FmhaBwdGroupPersistentCuState
+-        // written via x86 SIMD; misaligned destinations fault.
 -        const size_t seqstart_bytes = traits_.is_group_mode ? sizeof(int) * (traits_.batch + 1) : 0;
 -        const size_t seqstart_stride =
 -            ck_tile::integer_least_multiple(seqstart_bytes, static_cast<size_t>(16));
@@ -290,7 +292,7 @@ index ef07978cc..5a3dd651d 100644
      }
  
      private:
-@@ -796,39 +693,17 @@ struct fmha_bwd_launcher
+@@ -798,39 +693,17 @@ struct fmha_bwd_launcher
      bool needs_zero_dq_acc_ = false;
  
      // Function pointer (points to code segment, survives launcher destruction)
@@ -335,7 +337,7 @@ index ef07978cc..5a3dd651d 100644
  
      template <typename T0 /*dot_do_o_trait*/,
                typename T1 /*dq_dk_dv_trait*/,
-@@ -852,7 +727,7 @@ struct fmha_bwd_launcher
+@@ -854,7 +727,7 @@ struct fmha_bwd_launcher
                  t.batch, t.hdim_q, t.nhead_q, total_seqlen_q_padded, t.max_seqlen_k);
  
              // Store function pointer (directly assign template-instantiated function)
@@ -344,7 +346,7 @@ index ef07978cc..5a3dd651d 100644
  
              // Store captured data as member variables
              batch_    = t.batch;
-@@ -860,6 +735,7 @@ struct fmha_bwd_launcher
+@@ -862,6 +735,7 @@ struct fmha_bwd_launcher
              nhead_q_  = t.nhead_q;
              seqlen_q_ = t.seqlen_q;
              seqlen_k_ = t.seqlen_k;
@@ -410,10 +412,10 @@ index b99649074..b6448687f 100644
  
          dq_buf.FromDevice(dq_host.data());
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
-index 7aff21530..18c7b567f 100644
+index 497cf8d7a..08e2e2e65 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
-@@ -155,6 +155,66 @@ struct FmhaBwdWorkspaceManager
+@@ -374,6 +374,66 @@ struct FmhaBwdWorkspaceManager
          }
      }
  
@@ -480,7 +482,7 @@ index 7aff21530..18c7b567f 100644
      template <bool kUseQrQtrDorPipeline, bool kHasMask>
      CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
      {
-@@ -211,6 +271,72 @@ struct FmhaBwdWorkspaceManager
+@@ -438,6 +498,72 @@ struct FmhaBwdWorkspaceManager
      }
  };
  
@@ -554,10 +556,10 @@ index 7aff21530..18c7b567f 100644
            typename KGradEpiloguePipeline_,
            typename VGradEpiloguePipeline_,
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
-index 5f934492e..21c038eac 100644
+index 1010fca9f..c397cb2ea 100644
 --- a/csrc/cpp_itfs/mha_bwd.cu
 +++ b/csrc/cpp_itfs/mha_bwd.cu
-@@ -141,12 +141,6 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -251,12 +251,6 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
          return -1;
      }
  
@@ -570,7 +572,7 @@ index 5f934492e..21c038eac 100644
      const fmha_bwd_traits traits{
          a.seqlen_q,
          a.seqlen_k,
-@@ -170,15 +164,13 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -280,15 +274,13 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
      fmha_bwd_launcher launcher(traits);
      void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/false);
  
@@ -591,7 +593,7 @@ index 5f934492e..21c038eac 100644
      fmha_bwd_args ck_args{
          /* q_ptr              */ a.q_ptr,
 diff --git a/csrc/include/mha_bwd.h b/csrc/include/mha_bwd.h
-index e58f6f605..1efc8c645 100644
+index cf38addd3..618698272 100644
 --- a/csrc/include/mha_bwd.h
 +++ b/csrc/include/mha_bwd.h
 @@ -148,17 +148,6 @@ struct mha_bwd_args
