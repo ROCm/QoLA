@@ -18,4 +18,11 @@ QOLA_NS_BEGIN
 __attribute__((visibility("default")))
 float mha_fwd(const aiter::mha_fwd_args& args, const ck_tile::stream_config& stream_config);
 
+#if FAV_NATIVE_ON
+__attribute__((visibility("default")))
+int mha_fwd_calculate_num_splits(const aiter::mha_fwd_args& args);
+
+__attribute__((visibility("default"))) size_t mha_fwd_workspace_size(const aiter::mha_fwd_args& a);
+#endif
+
 QOLA_NS_END
