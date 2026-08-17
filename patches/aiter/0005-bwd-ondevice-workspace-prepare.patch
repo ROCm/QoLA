@@ -2,7 +2,7 @@ diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha
 index 0a71ef677..b862bc32f 100644
 --- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
 +++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
-@@ -196,6 +196,26 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
+@@ -221,6 +221,26 @@ size_t fmha_bwd_dq_dk_dv_dq_prepare_ws_host_<dq_dk_dv_trait_{F_idx}, {F_arch.tag
          cpu_ws, batch_size, hdim_q, nhead_q, seqlen_q, seqlen_k, seqstart_qs, seqstart_ks);
  }}
  
@@ -182,7 +182,7 @@ index ef07978cc..5a3dd651d 100644
          if(host_ws_size_ == 0)
          {
              if(needs_zero_dq_acc_ && workspace_size > 0)
-@@ -703,91 +662,29 @@ struct fmha_bwd_launcher
+@@ -703,93 +662,29 @@ struct fmha_bwd_launcher
              return;
          }
  
@@ -192,6 +192,8 @@ index ef07978cc..5a3dd651d 100644
 -
 -        // Allocate pinned host staging first: if it throws we haven't issued any
 -        // stream work yet, leaving the workspace cleanly un-prepared.
+-        // 16-align each section: pin_w stores alignas(16) FmhaBwdGroupPersistentCuState
+-        // written via x86 SIMD; misaligned destinations fault.
 -        const size_t seqstart_bytes = traits_.is_group_mode ? sizeof(int) * (traits_.batch + 1) : 0;
 -        const size_t seqstart_stride =
 -            ck_tile::integer_least_multiple(seqstart_bytes, static_cast<size_t>(16));

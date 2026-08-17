@@ -18,7 +18,7 @@ QOLA_NS_BEGIN
 __attribute__((visibility("default")))
 float mha_fwd(const aiter::mha_fwd_args& args, const ck_tile::stream_config& stream_config);
 
-#if FAV_NATIVE_ON
+#if FA_WITH_NATIVE_SPLITKV
 __attribute__((visibility("default")))
 int mha_fwd_calculate_num_splits(const aiter::mha_fwd_args& args);
 

@@ -43,13 +43,13 @@ index a57df7c2d..a0bed81de 100644
      int ts_odo;
      int ts_kv;
      int ts_dq;
-@@ -438,9 +444,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -553,9 +559,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
          }
      }
  
 -    if(a.v3_api_check)
 -        return 1;
 -
-     fmha_bwd_odo_args odo_args;
+     const auto odo_args  = make_fmha_bwd_odo_logical_args(a);
+     auto odo_arg_storage = pack_fmha_bwd_odo_args(odo_args, compact_odo_args);
  
-     odo_args.ptr_o           = a.o_ptr;
