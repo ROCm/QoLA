@@ -34,6 +34,7 @@ class BuildSpec:
     is_python_module: bool = True
     is_standalone: bool = False
     torch_exclude: bool = False
+    third_party: List[str] = field(default_factory=list)
     hipify: bool = False
     hip_clang_path: Optional[str] = None
     hsa_subdirs: List[str] = field(default_factory=list)
@@ -51,6 +52,7 @@ _DEFAULTS: dict[str, Any] = {
     "is_python_module": True,
     "is_standalone": False,
     "torch_exclude": False,
+    "third_party": [],
     "blob_gen_cmd": "",
     "hipify": False,
     "hip_clang_path": None,
@@ -76,6 +78,7 @@ def load_manifest(
     manifest_path: str,
     ns: AiterNamespace,
     build_mode: Optional[str] = None,
+    groups: Optional[List[str]] = None,
 ) -> List[BuildSpec]:
     """Parse a TOML manifest and return resolved :class:`BuildSpec` instances.
 
@@ -92,6 +95,12 @@ def load_manifest(
         Per-module ``mode`` entries in ``[[modules]]`` still take final
         precedence (most specific scope).  When ``None`` and unset in the
         manifest, defaults to ``"pybind"``.
+    groups
+        When provided, restricts the build to ``[[modules]]`` entries whose
+        ``group`` is in this list.  This lets a single manifest -- one AITER
+        commit, one patch set, one checkout -- serve several independent
+        consumers that each build only their own subset of kernels.  When
+        ``None``, every module in the manifest is built.
 
     Manifest schema::
 
@@ -105,6 +114,7 @@ def load_manifest(
 
         [[modules]]
         name = "libmha_fwd"
+        group = "ck_fused_attn"           # optional; selectable via --group
         mode = "cpp_itfs"                 # optional per-module override
         receipt = 700                     # optional CK codegen filter (default: whatever
                                           # optCompilerConfig.json specifies, typically 600)
@@ -133,15 +143,51 @@ def load_manifest(
     global_mode = build_mode or manifest.get("build", {}).get("mode") or "pybind"
     namespace = manifest.get("qola", {}).get("namespace", "")
 
+    # Resolve effective arch list for CK fmha --targets pinning. builder.py
+    # sets GPU_ARCHS to the CLI / manifest / env-resolved list before calling
+    # us, so reading it here gives the post-precedence value.
+    gpu_archs_env = os.getenv("GPU_ARCHS", "")
+    resolved_archs = [a.strip() for a in gpu_archs_env.split(";") if a.strip()]
+
+    # Restrict to the requested module groups, if any.  Ungrouped modules are
+    # excluded when filtering is active: a manifest shared by several
+    # consumers should say explicitly who owns each module.
+    all_modules = manifest.get("modules", [])
+    if groups is not None:
+        wanted = set(groups)
+        declared = {m["group"] for m in all_modules if "group" in m}
+        unknown = wanted - declared
+        if unknown:
+            raise ValueError(
+                f"Unknown module group(s) {sorted(unknown)} for manifest "
+                f"{manifest_path}. Declared groups: {sorted(declared) or '(none)'}."
+            )
+        selected_modules = [m for m in all_modules if m.get("group") in wanted]
+        if not selected_modules:
+            raise ValueError(
+                f"No modules selected for group(s) {sorted(wanted)} in "
+                f"manifest {manifest_path}."
+            )
+    else:
+        selected_modules = all_modules
+
     specs: List[BuildSpec] = []
     fwd_section = manifest.get("mha_fwd_variants", [])
-    module_names = {m["name"] for m in manifest.get("modules", [])}
+    module_names = {m["name"] for m in selected_modules}
 
     has_fwd_variants = bool(fwd_section)
     has_static_fwd = "libmha_fwd" in module_names
 
     # Keys consumed by load_manifest before passing to _resolve_static_module.
-    _MANIFEST_KEYS = {"name", "mode", "drop_srcs", "drop_directions", "hsa_subdirs", "receipt"}
+    _MANIFEST_KEYS = {
+        "name",
+        "group",
+        "mode",
+        "drop_srcs",
+        "drop_directions",
+        "hsa_subdirs",
+        "receipt",
+    }
 
     # --- static modules ---
     # NOTE: Variant filtering is NOT applied to static libmha_fwd /
@@ -149,7 +195,7 @@ def load_manifest(
     # files and the dispatch API file (fmha_*_api.cpp) on every call.
     # Running it N times with different --filter patterns overwrites the
     # API dispatch, leaving only the last filter's branches.
-    for mod_entry in manifest.get("modules", []):
+    for mod_entry in selected_modules:
         name = mod_entry["name"]
         mod_mode = mod_entry.get("mode", global_mode)
         drop_srcs = set(mod_entry.get("drop_srcs", []))
@@ -164,9 +210,13 @@ def load_manifest(
         receipt = mod_entry.get("receipt")
         if receipt is not None:
             _rewrite_receipt(spec, receipt)
+        _pin_fmha_targets(spec, resolved_archs)
 
         if mod_mode == "cpp_itfs":
             _apply_cpp_itfs(spec, name, namespace, eval_globals)
+            manifest_hsa = mod_entry.get("hsa_subdirs")
+            if manifest_hsa is not None:
+                spec.hsa_subdirs = manifest_hsa
         else:
             # For pybind mode, hsa_subdirs comes from the manifest entry,
             # falling back to the registry (which is authoritative for the
@@ -192,8 +242,9 @@ def load_manifest(
         from .variant_matrix import expand_mha_variants
 
         mha_specs = expand_mha_variants(fwd_section, ns)
-        if namespace:
-            for spec in mha_specs:
+        for spec in mha_specs:
+            _pin_fmha_targets(spec, resolved_archs)
+            if namespace:
                 spec.md_name = f"{namespace}_{spec.md_name}"
         specs.extend(mha_specs)
 
@@ -312,6 +363,45 @@ _DIR_RE = re.compile(r"-d\s+(\S+)")
 # Regex to match the ``--receipt N`` argument in a generate.py command.
 _RECEIPT_RE = re.compile(r"--receipt\s+\d+")
 
+# Regex to match ``--targets=<list>`` or ``--targets <list>`` on a generate.py
+# command. Used to pin CK fmha codegen to the resolved GPU_ARCHS so we don't
+# pay compile cost for the ``gfx9,gfx950`` default family-superset.
+_TARGETS_RE = re.compile(r"--targets(?:=|\s+)\S+")
+_FMHA_GENERATE_PY_MARKER = "01_fmha/generate.py"
+
+
+def _pin_fmha_targets(spec: BuildSpec, archs: List[str]) -> None:
+    """Pin ``--targets=<archs>`` on every ``01_fmha/generate.py`` invocation.
+
+    Without this, CK's generate.py defaults to ``--targets=gfx9,gfx950``
+    (a family-wildcard superset), which materializes ``_gfx9.cpp`` instances
+    guarded by ``defined(__gfx9__) && !defined(__gfx950__)``. On a
+    gfx950-only build those TUs compile to no-ops but still incur hipcc
+    cost; on a gfx942-only build the gfx950 instances are similarly wasted.
+    """
+    if not archs:
+        return
+    if any(a.strip().lower() in {"", "native"} for a in archs):
+        # Don't second-guess CK's default when GPU_ARCHS is unset/native.
+        return
+    pin = "--targets=" + ",".join(a.strip() for a in archs)
+    old_cmds: List[str] = (
+        spec.blob_gen_cmd
+        if isinstance(spec.blob_gen_cmd, list)
+        else [spec.blob_gen_cmd] if spec.blob_gen_cmd else []
+    )
+    new_cmds: List[str] = []
+    for cmd in old_cmds:
+        if _FMHA_GENERATE_PY_MARKER not in cmd:
+            new_cmds.append(cmd)
+            continue
+        if _TARGETS_RE.search(cmd):
+            cmd = _TARGETS_RE.sub(pin, cmd)
+        else:
+            cmd = cmd.replace("generate.py", f"generate.py {pin}", 1)
+        new_cmds.append(cmd)
+    spec.blob_gen_cmd = new_cmds
+
 
 def _drop_blob_directions(spec: BuildSpec, drop_directions: set) -> None:
     """Remove ``blob_gen_cmd`` entries whose ``-d <direction>`` is in *drop_directions*."""
@@ -392,9 +482,9 @@ def _eval_entry(
         is_python_module=bool(resolved.get("is_python_module", True)),
         is_standalone=bool(resolved.get("is_standalone", False)),
         torch_exclude=bool(resolved.get("torch_exclude", False)),
+        third_party=list(resolved.get("third_party", [])),
         hipify=bool(resolved.get("hipify", False)),
         hip_clang_path=resolved.get("hip_clang_path"),
-        third_party=resolved.get("third_party", []),
     )
 
 

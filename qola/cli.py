@@ -77,6 +77,16 @@ def main(argv: list[str] | None = None) -> int:
         "when this is set.",
     )
     build_p.add_argument(
+        "--group",
+        action="append",
+        dest="groups",
+        help="Build only the [[modules]] entries whose 'group' matches. "
+        "Repeatable, and accepts a ';'-separated list. Lets one manifest "
+        "(one AITER commit, one patch set, one checkout) serve several "
+        "consumers that each build their own subset of kernels. When "
+        "omitted, every module in the manifest is built.",
+    )
+    build_p.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -129,6 +139,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.archs:
             archs = [a for entry in args.archs for a in entry.split(";") if a]
 
+        groups: list[str] | None = None
+        if args.groups:
+            groups = [g for entry in args.groups for g in entry.split(";") if g]
+
         result = build_kernels(
             manifest_path=args.manifest,
             aiter_root=args.aiter_root,
@@ -139,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
             aiter_commit=args.aiter_commit,
             patches_dir=args.patches_dir,
             skip_checkout=args.skip_checkout,
+            groups=groups,
         )
         s = result["summary"]
         print(
