@@ -24,4 +24,12 @@ size_t mha_fwd_workspace_size(const aiter::mha_fwd_args& a)
 }
 #endif
 
+#if FA_WITH_SINK
+bool mha_fwd_with_sink_supported(const aiter::mha_fwd_args& a)
+{
+    return ::aiter::mha_fwd_with_sink_supported(a);
+}
+#endif
+
+
 QOLA_NS_END

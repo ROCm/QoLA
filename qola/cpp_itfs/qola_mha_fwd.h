@@ -25,4 +25,9 @@ int mha_fwd_calculate_num_splits(const aiter::mha_fwd_args& args);
 __attribute__((visibility("default"))) size_t mha_fwd_workspace_size(const aiter::mha_fwd_args& a);
 #endif
 
+#if FA_WITH_SINK
+__attribute__((visibility("default")))
+bool mha_fwd_with_sink_supported(const aiter::mha_fwd_args& a);
+#endif
+
 QOLA_NS_END
