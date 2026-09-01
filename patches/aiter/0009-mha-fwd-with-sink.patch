@@ -29,7 +29,7 @@ index dfd8a964a..fd3a0d02c 100644
      },
      "libmha_bwd": {
 diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
-index 49b762d9a..32f4b8db3 100644
+index 49b762d9a..a7a46bcdd 100644
 --- a/csrc/cpp_itfs/mha_fwd.cu
 +++ b/csrc/cpp_itfs/mha_fwd.cu
 @@ -6,6 +6,34 @@
@@ -67,7 +67,7 @@ index 49b762d9a..32f4b8db3 100644
  #include <memory>
  #include <string>
  
-@@ -558,6 +586,166 @@ static float fmha_fwd_native_splitkv(const mha_fwd_args& a, const ck_tile::strea
+@@ -558,6 +586,156 @@ static float fmha_fwd_native_splitkv(const mha_fwd_args& a, const ck_tile::strea
  }
  #endif
  
@@ -76,11 +76,11 @@ index 49b762d9a..32f4b8db3 100644
 +// ---------------------------------------------------------------------------
 +// Check eligibility for gfx1250 BF16 ASM sink path (fmha_fwd_with_sink_asm).
 +//
-+// Supported: batched mode (!is_group_mode), bf16, hdim_q ∈ {64}, hdim_v
-+// == hdim_q, no bias/dropout/swa/descale.  Returns 0.f on success, -1.f
-+// when conditions are not met (caller falls through to the next path).
++// Supported: batched mode (!is_group_mode), bf16, hdim_q ∈ {64, 128}, hdim_v
++// == hdim_q, no bias/dropout/swa/descale.
++// Returns true if eligible, false otherwise.
 +// ---------------------------------------------------------------------------
-+static bool fmha_fwd_sink_asm_eligible(const mha_fwd_args& a)
++bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
 +{
 +    // ---- guard conditions --------------------------------------------------
 +    if(get_gpu_arch() != "gfx1250") return false;
@@ -95,18 +95,11 @@ index 49b762d9a..32f4b8db3 100644
 +    return true;
 +}
 +
-+bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
-+{
-+    return fmha_fwd_sink_asm_eligible(a) && (a.hdim_q == 64); //only D64 kernel supports sink
-+}
-+
 +// ---------------------------------------------------------------------------
 +// fmha_fwd_gfx1250_batched: thin bridge from mha_fwd_args → aiter_tensor_t*
 +// for the gfx1250 BF16 ASM sink path (fmha_fwd_with_sink_asm).
 +//
-+// Supported: batched mode (!is_group_mode), bf16, hdim_q ∈ {64,128}, hdim_v
-+// == hdim_q, no bias/dropout/swa/descale.  Returns 0.f on success, -1.f
-+// when conditions are not met (caller falls through to the next path).
++// Returns 0.f on success, -1.f when eligibility conditions are not met
 +//
 +// mha_fwd_args stride fields (stride_q, nhead_stride_q, batch_stride_q …)
 +// are in *elements* — the same unit that aiter_tensor_t.strides[] stores —
@@ -116,12 +109,9 @@ index 49b762d9a..32f4b8db3 100644
 +                                       const ck_tile::stream_config& s)
 +{
 +    // ---- guard conditions --------------------------------------------------
-+    if (!fmha_fwd_sink_asm_eligible(a)) return -1.f;
++    if (!mha_fwd_with_sink_supported(a)) return -1.f;
 +    if (a.q_descale_ptr || a.k_descale_ptr || a.v_descale_ptr) return -1.f;
-+    // D128 binary (ENABLE_SINK=0) ignores sink; D64 binary (ENABLE_SINK=1)
-+    // unconditionally reads it — require explicit sink for D64, forbid for D128.
-+    if (a.hdim_q == 64  && !a.sink_ptr) return -1.f;
-+    if (a.hdim_q == 128 &&  a.sink_ptr) return -1.f;
++    if (!a.sink_ptr) return -1.f;
 +
 +    // ---- build aiter_tensor_t descriptors from mha_fwd_args ---------------
 +    // Strides are in elements (matching aiter_tensor_t convention).
@@ -234,7 +224,7 @@ index 49b762d9a..32f4b8db3 100644
  float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
  {
      float ret = -1;
-@@ -570,6 +758,12 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
+@@ -570,6 +748,12 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
          return fmha_fwd_native_splitkv(args, s);
  #endif
  
