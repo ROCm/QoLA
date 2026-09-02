@@ -412,10 +412,10 @@ index b99649074..b6448687f 100644
  
          dq_buf.FromDevice(dq_host.data());
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
-index 497cf8d7a..08e2e2e65 100644
+index 497cf8d7a..c666fc05f 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
-@@ -374,6 +374,66 @@ struct FmhaBwdWorkspaceManager
+@@ -374,10 +374,70 @@ struct FmhaBwdWorkspaceManager
          }
      }
  
@@ -482,6 +482,11 @@ index 497cf8d7a..08e2e2e65 100644
      template <bool kUseQrQtrDorPipeline, bool kHasMask>
      CK_TILE_HOST static constexpr bool NeedsZeroDqAcc()
      {
+-        constexpr bool kUsePersistent = !kUseQrQtrDorPipeline && kIsDeterministic;
++        constexpr bool kUsePersistent = !kUseQrQtrDorPipeline && kIsDeterministic && !kIsGroupMode;
+         // Group + persistent + deterministic: dq_acc is zeroed by a separate
+         // DqAccPrezeroKernel (see kNeedsKernelPrezeroDqAcc) launched before this
+         // kernel, avoiding the launcher memset over the workspace upper bound
 @@ -438,6 +498,72 @@ struct FmhaBwdWorkspaceManager
      }
  };
@@ -555,6 +560,33 @@ index 497cf8d7a..08e2e2e65 100644
  template <typename FmhaPipeline_,
            typename KGradEpiloguePipeline_,
            typename VGradEpiloguePipeline_,
+@@ -490,7 +616,7 @@ struct FmhaBwdDQDKDVKernel
+ #else
+     static constexpr bool kIsAvailable = !kUseTrLoad;
+ #endif
+-    static constexpr bool kUsePersistent = kIsDeterministic && !kUseQrQtrDorPipeline;
++    static constexpr bool kUsePersistent = kIsDeterministic && !kUseQrQtrDorPipeline && !kIsGroupMode;
+     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
+ 
+     // clang-format off
+@@ -566,7 +692,7 @@ struct FmhaBwdDQDKDVKernel
+     // is false yet dq_acc still has unowned slots (per-head varying active isplit
+     // sets) that must be zeroed beforehand.
+     static constexpr bool kNeedsKernelPrezeroDqAcc =
+-        kIsGroupMode && kIsDeterministic && !kUseQrQtrDorPipeline;
++        kIsGroupMode && kUsePersistent && kIsDeterministic; // always false
+ 
+     // Flat-zeroes the active dq_acc region before the main kernel.
+     struct DqAccPrezeroKernel
+@@ -2278,7 +2404,7 @@ struct FmhaBwdConvertQGradKernel
+     static constexpr bool kPadSeqLenQ      = FmhaBwdConvertQGrad::kPadSeqLenQ;
+     static constexpr bool kPadHeadDimQ     = FmhaBwdConvertQGrad::kPadHeadDimQ;
+     static constexpr bool kIsDeterministic = FmhaBwdConvertQGrad::kIsDeterministic;
+-    static constexpr bool kUsePersistent   = kIsDeterministic;
++    static constexpr bool kUsePersistent   = kIsDeterministic && !kIsGroupMode;
+     using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
+ 
+     // clang-format off
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
 index 1010fca9f..c397cb2ea 100644
 --- a/csrc/cpp_itfs/mha_bwd.cu
