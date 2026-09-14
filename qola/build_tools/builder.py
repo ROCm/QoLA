@@ -127,6 +127,7 @@ def build_kernels(
             aiter_root=aiter_root,
             aiter_commit=aiter_commit,
             patches_dir=patches_dir,
+            groups=groups,
         )
 
     # Fall back to manifest's [build] architectures when not specified via CLI.

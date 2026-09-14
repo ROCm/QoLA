@@ -74,6 +74,61 @@ def _load_cpp_itfs_src_map() -> Dict[str, Dict[str, List[str]]]:
         return tomllib.load(f)
 
 
+def select_modules(
+    all_modules: List[Dict[str, Any]],
+    groups: Optional[List[str]],
+    manifest_path: str,
+) -> List[Dict[str, Any]]:
+    """Restrict ``[[modules]]`` entries to the requested *groups*.
+
+    Ungrouped modules are excluded when filtering is active: a manifest
+    shared by several consumers should say explicitly who owns each module.
+    When *groups* is ``None``, every module is returned.
+
+    Raises
+    ------
+    ValueError
+        If a requested group is not declared by any module, or if the
+        selection comes back empty.
+    """
+    if groups is None:
+        return list(all_modules)
+
+    wanted = set(groups)
+    declared = {m["group"] for m in all_modules if "group" in m}
+    unknown = wanted - declared
+    if unknown:
+        raise ValueError(
+            f"Unknown module group(s) {sorted(unknown)} for manifest "
+            f"{manifest_path}. Declared groups: {sorted(declared) or '(none)'}."
+        )
+    selected = [m for m in all_modules if m.get("group") in wanted]
+    if not selected:
+        raise ValueError(
+            f"No modules selected for group(s) {sorted(wanted)} in "
+            f"manifest {manifest_path}."
+        )
+    return selected
+
+
+def select_module_names(
+    manifest_path: str,
+    groups: Optional[List[str]] = None,
+) -> List[str]:
+    """Return the module names a set of *groups* covers in a manifest.
+
+    Parses only the manifest's ``[[modules]]`` table — no AITER source
+    tree, namespace resolution, or ``optCompilerConfig.json`` eval
+    required.  Used by ``qola checkout`` to validate ``--group`` values
+    before any expensive work happens, and by downstream tooling that
+    wants to know what a group covers without building it.
+    """
+    with open(manifest_path, "rb") as f:
+        manifest = tomllib.load(f)
+    modules = select_modules(manifest.get("modules", []), groups, manifest_path)
+    return [m["name"] for m in modules]
+
+
 def load_manifest(
     manifest_path: str,
     ns: AiterNamespace,
@@ -149,27 +204,10 @@ def load_manifest(
     gpu_archs_env = os.getenv("GPU_ARCHS", "")
     resolved_archs = [a.strip() for a in gpu_archs_env.split(";") if a.strip()]
 
-    # Restrict to the requested module groups, if any.  Ungrouped modules are
-    # excluded when filtering is active: a manifest shared by several
-    # consumers should say explicitly who owns each module.
-    all_modules = manifest.get("modules", [])
-    if groups is not None:
-        wanted = set(groups)
-        declared = {m["group"] for m in all_modules if "group" in m}
-        unknown = wanted - declared
-        if unknown:
-            raise ValueError(
-                f"Unknown module group(s) {sorted(unknown)} for manifest "
-                f"{manifest_path}. Declared groups: {sorted(declared) or '(none)'}."
-            )
-        selected_modules = [m for m in all_modules if m.get("group") in wanted]
-        if not selected_modules:
-            raise ValueError(
-                f"No modules selected for group(s) {sorted(wanted)} in "
-                f"manifest {manifest_path}."
-            )
-    else:
-        selected_modules = all_modules
+    # Restrict to the requested module groups, if any.
+    selected_modules = select_modules(
+        manifest.get("modules", []), groups, manifest_path
+    )
 
     specs: List[BuildSpec] = []
     fwd_section = manifest.get("mha_fwd_variants", [])

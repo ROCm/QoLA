@@ -3,18 +3,38 @@
 #
 # CMake integration for QoLA's ahead-of-time AITER kernel builder.
 #
-# Consumers include this file and call qola_add_modules() once per module
-# group.  It owns everything between "here is a manifest" and "here are the
-# headers and libraries to link":
+# This file owns everything between "here is a manifest" and "here are the
+# headers and libraries to link", split into two independently callable
+# phases:
 #
-#   * parsing the manifest's pinned AITER commit,
-#   * syncing the AITER source tree to it (or honouring an override),
-#   * invoking `qola build` for the requested group and architectures,
-#   * locating the resulting public headers and shared objects.
+#   qola_checkout_aiter()  — parse the manifest's pinned AITER commit and sync
+#                            the source tree to it (or honour an override).
+#   qola_build_modules()   — run `qola build --skip-checkout` for one module
+#                            group and locate the resulting headers / .so's.
 #
-# Usage:
+# Two-phase usage — check out once (optionally per group), build later:
 #
 #   include(${QOLA_DIR}/cmake/QoLA.cmake)
+#   qola_checkout_aiter(
+#     MANIFEST   ${CMAKE_CURRENT_LIST_DIR}/qola_manifest.toml
+#     AITER_DIR  ${CMAKE_CURRENT_BINARY_DIR}/qola/third_party/aiter
+#     GROUPS     aiter_gemm
+#     OUT_DIR    QOLA_AITER_SOURCE_DIR)
+#
+#   # ...anything that needs AITER sources at configure time...
+#
+#   qola_build_modules(
+#     GROUP        aiter_gemm
+#     MANIFEST     ${CMAKE_CURRENT_LIST_DIR}/qola_manifest.toml
+#     BUILD_DIR    ${CMAKE_CURRENT_BINARY_DIR}/qola
+#     AITER_DIR    ${QOLA_AITER_SOURCE_DIR}
+#     ARCHS        ${MY_ARCHS}
+#     OUT_INCLUDE_DIR  QOLA_GEMM_INCLUDE_DIR
+#     OUT_LIB_DIR      QOLA_GEMM_LIB_DIR
+#     OUT_LIBS         QOLA_GEMM_LIBS)
+#
+# Single-call usage — qola_add_modules() does both phases for one group:
+#
 #   qola_add_modules(
 #     GROUP        aiter_gemm
 #     MANIFEST     ${CMAKE_CURRENT_LIST_DIR}/qola_manifest.toml
@@ -24,6 +44,9 @@
 #     OUT_LIB_DIR      QOLA_GEMM_LIB_DIR
 #     OUT_LIBS         QOLA_GEMM_LIBS
 #     OUT_AITER_DIR    QOLA_AITER_SOURCE_DIR)
+#
+# Every group in a manifest shares one AITER tree (one commit, one patch set),
+# so several groups can be built from a single checkout.
 #
 # Environment overrides honoured by this module:
 #   QOLA_AITER_SOURCE_DIR / NVTE_AITER_SOURCE_DIR
@@ -89,16 +112,59 @@ function(qola_run_cli what)
   endif()
 endfunction()
 
+# Resolve the QOLA_PREBUILT_DIR_<GROUP> bypass for one group.
+#
+# Sets <out_var> to the prebuilt directory, or "" when the group is not
+# bypassed.  A prebuilt group needs neither a checkout nor a build.
+function(qola_prebuilt_dir group out_var)
+  string(TOUPPER "${group}" _group_uc)
+  set(_env "QOLA_PREBUILT_DIR_${_group_uc}")
+  if(DEFINED ENV{${_env}} AND NOT "$ENV{${_env}}" STREQUAL "")
+    set(${out_var} "$ENV{${_env}}" PARENT_SCOPE)
+  else()
+    set(${out_var} "" PARENT_SCOPE)
+  endif()
+endfunction()
+
 # Sync the AITER source tree named by a manifest, unless overridden.
 #
-# Sets <out_dir_var> to the tree to build against.  Idempotent across
-# consumers: the first caller performs the checkout and later callers with the
-# same manifest + destination short-circuit.
+# This is the checkout phase on its own — call it when the tree must exist
+# before the kernels are built (deferred / per-group builds, or when other
+# parts of the configure step need AITER headers):
+#
+#   qola_checkout_aiter(
+#     MANIFEST   ${_manifest}
+#     AITER_DIR  ${CMAKE_BINARY_DIR}/qola/third_party/aiter
+#     GROUPS     aiter_gemm ck_fused_attn   # optional; validated, not filtered
+#     OUT_DIR    AITER_SOURCE_DIR)
+#
+#   qola_build_modules(GROUP aiter_gemm AITER_DIR ${AITER_SOURCE_DIR} ...)
+#
+# Destination is AITER_DIR, else DEFAULT_DIR; one of the two is required.
+# GROUPS does not change the resulting tree — a manifest pins one commit and
+# one patch set, so all its groups share a checkout — it only fails the
+# configure step early on a group name the manifest does not declare.
+#
+# Sets <OUT_DIR> to the tree to build against.  Idempotent across consumers:
+# the first caller performs the checkout and later callers with the same
+# commit + destination short-circuit.
 function(qola_checkout_aiter)
   set(_opts)
-  set(_one MANIFEST DEFAULT_DIR OUT_DIR)
-  set(_multi)
+  set(_one MANIFEST AITER_DIR DEFAULT_DIR OUT_DIR)
+  set(_multi GROUPS)
   cmake_parse_arguments(QCA "${_opts}" "${_one}" "${_multi}" ${ARGN})
+
+  if(NOT QCA_MANIFEST)
+    message(FATAL_ERROR "[QoLA] qola_checkout_aiter: MANIFEST is required.")
+  endif()
+  if(QCA_AITER_DIR)
+    set(QCA_DEFAULT_DIR "${QCA_AITER_DIR}")
+  endif()
+  if(NOT QCA_DEFAULT_DIR)
+    message(FATAL_ERROR
+            "[QoLA] qola_checkout_aiter: one of AITER_DIR or DEFAULT_DIR is "
+            "required (destination for the AITER source tree).")
+  endif()
 
   set(_aiter_dir "${QCA_DEFAULT_DIR}")
   set(_skip FALSE)
@@ -121,10 +187,15 @@ function(qola_checkout_aiter)
     if(_done)
       message(STATUS "[QoLA] AITER already synced to ${_sha} at ${_aiter_dir}.")
     else()
+      set(_group_args)
+      foreach(_group ${QCA_GROUPS})
+        list(APPEND _group_args --group "${_group}")
+      endforeach()
       qola_run_cli("AITER checkout to ${_sha}"
                    checkout
                    --manifest "${QCA_MANIFEST}"
-                   --aiter-root "${_aiter_dir}")
+                   --aiter-root "${_aiter_dir}"
+                   ${_group_args})
       set_property(GLOBAL PROPERTY QOLA_CHECKOUT_DONE_${_sha}_${_aiter_dir} TRUE)
       message(STATUS "[QoLA] Synced ${_aiter_dir} to ${_sha}")
     endif()
@@ -137,42 +208,53 @@ function(qola_checkout_aiter)
   set(${QCA_OUT_DIR} "${_aiter_dir}" PARENT_SCOPE)
 endfunction()
 
-# Build (or locate prebuilt) kernel libraries for one manifest module group.
-function(qola_add_modules)
+# Build (or locate prebuilt) kernel libraries for one manifest module group,
+# against an AITER tree that has already been checked out.
+#
+# This is the build phase on its own: it never touches the AITER checkout, so
+# a consumer can run qola_checkout_aiter() early (or once for several groups)
+# and defer each group's build to whenever it is ready.  AITER_DIR is required
+# unless the group is bypassed via QOLA_PREBUILT_DIR_<GROUP>.
+#
+# Use qola_add_modules() instead when one call should do both phases.
+function(qola_build_modules)
   set(_opts)
   set(_one GROUP MANIFEST BUILD_DIR AITER_DIR
-           OUT_INCLUDE_DIR OUT_LIB_DIR OUT_LIBS OUT_AITER_DIR OUT_CONFIG_DIR)
+           OUT_INCLUDE_DIR OUT_LIB_DIR OUT_LIBS OUT_CONFIG_DIR)
   set(_multi ARCHS LIBS)
   cmake_parse_arguments(QAM "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
   if(NOT QAM_GROUP)
-    message(FATAL_ERROR "[QoLA] qola_add_modules: GROUP is required.")
-  endif()
-  if(NOT QAM_MANIFEST)
-    message(FATAL_ERROR "[QoLA] qola_add_modules: MANIFEST is required.")
+    message(FATAL_ERROR "[QoLA] qola_build_modules: GROUP is required.")
   endif()
   if(NOT QAM_BUILD_DIR)
-    message(FATAL_ERROR "[QoLA] qola_add_modules: BUILD_DIR is required.")
+    message(FATAL_ERROR "[QoLA] qola_build_modules: BUILD_DIR is required.")
   endif()
 
   # Prebuilt bypass: consume an existing lib/ + include/ pair.
-  string(TOUPPER "${QAM_GROUP}" _group_uc)
-  set(_prebuilt_env "QOLA_PREBUILT_DIR_${_group_uc}")
-  if(DEFINED ENV{${_prebuilt_env}} AND NOT "$ENV{${_prebuilt_env}}" STREQUAL "")
-    set(_prebuilt "$ENV{${_prebuilt_env}}")
+  qola_prebuilt_dir("${QAM_GROUP}" _prebuilt)
+  if(_prebuilt)
     message(STATUS "[QoLA] ${QAM_GROUP}: using prebuilt libraries from ${_prebuilt}")
     set(_include_dir "${_prebuilt}/include")
     set(_lib_dir "${_prebuilt}/lib")
     set(_config_dir "${_prebuilt}/configs")
   else()
-    if(QAM_AITER_DIR)
-      set(_aiter_dir "${QAM_AITER_DIR}")
-    else()
-      qola_checkout_aiter(
-        MANIFEST "${QAM_MANIFEST}"
-        DEFAULT_DIR "${QAM_BUILD_DIR}/third_party/aiter"
-        OUT_DIR _aiter_dir)
+    if(NOT QAM_MANIFEST)
+      message(FATAL_ERROR "[QoLA] qola_build_modules: MANIFEST is required.")
     endif()
+    if(NOT QAM_AITER_DIR)
+      message(FATAL_ERROR
+              "[QoLA] qola_build_modules: AITER_DIR is required — this "
+              "function builds only. Run qola_checkout_aiter() first and pass "
+              "its OUT_DIR, or call qola_add_modules() to do both phases.")
+    endif()
+    if(NOT EXISTS "${QAM_AITER_DIR}/csrc/include")
+      message(FATAL_ERROR
+              "[QoLA] ${QAM_GROUP}: AITER_DIR ${QAM_AITER_DIR} does not look "
+              "like a checked-out AITER tree (no csrc/include). Run "
+              "qola_checkout_aiter() before building.")
+    endif()
+    set(_aiter_dir "${QAM_AITER_DIR}")
 
     string(REPLACE ";" ";" _archs "${QAM_ARCHS}")
     list(JOIN _archs ";" _archs_str)
@@ -188,9 +270,6 @@ function(qola_add_modules)
     set(_include_dir "${QAM_BUILD_DIR}/include")
     set(_lib_dir "${QAM_BUILD_DIR}/lib")
     set(_config_dir "${QAM_BUILD_DIR}/configs")
-    if(QAM_OUT_AITER_DIR)
-      set(${QAM_OUT_AITER_DIR} "${_aiter_dir}" PARENT_SCOPE)
-    endif()
   endif()
 
   if(NOT EXISTS "${_include_dir}/qola_config.h")
@@ -228,5 +307,70 @@ function(qola_add_modules)
   endif()
   if(QAM_OUT_CONFIG_DIR)
     set(${QAM_OUT_CONFIG_DIR} "${_config_dir}" PARENT_SCOPE)
+  endif()
+endfunction()
+
+# Check out AITER (if needed) and build one manifest module group.
+#
+# Convenience wrapper over qola_checkout_aiter() + qola_build_modules() for
+# consumers that want both phases in one call.  Pass AITER_DIR to reuse a tree
+# a previous call already prepared; omit it to check out into
+# <BUILD_DIR>/third_party/aiter.  A group bypassed via
+# QOLA_PREBUILT_DIR_<GROUP> skips both phases.
+function(qola_add_modules)
+  set(_opts)
+  set(_one GROUP MANIFEST BUILD_DIR AITER_DIR
+           OUT_INCLUDE_DIR OUT_LIB_DIR OUT_LIBS OUT_AITER_DIR OUT_CONFIG_DIR)
+  set(_multi ARCHS LIBS)
+  cmake_parse_arguments(QAM "${_opts}" "${_one}" "${_multi}" ${ARGN})
+
+  if(NOT QAM_GROUP)
+    message(FATAL_ERROR "[QoLA] qola_add_modules: GROUP is required.")
+  endif()
+  if(NOT QAM_MANIFEST)
+    message(FATAL_ERROR "[QoLA] qola_add_modules: MANIFEST is required.")
+  endif()
+  if(NOT QAM_BUILD_DIR)
+    message(FATAL_ERROR "[QoLA] qola_add_modules: BUILD_DIR is required.")
+  endif()
+
+  # A prebuilt group needs no AITER tree at all — don't pay for a checkout.
+  qola_prebuilt_dir("${QAM_GROUP}" _prebuilt)
+  set(_aiter_dir "${QAM_AITER_DIR}")
+  if(NOT _prebuilt AND NOT _aiter_dir)
+    qola_checkout_aiter(
+      MANIFEST "${QAM_MANIFEST}"
+      DEFAULT_DIR "${QAM_BUILD_DIR}/third_party/aiter"
+      GROUPS "${QAM_GROUP}"
+      OUT_DIR _aiter_dir)
+  endif()
+
+  qola_build_modules(
+    GROUP "${QAM_GROUP}"
+    MANIFEST "${QAM_MANIFEST}"
+    BUILD_DIR "${QAM_BUILD_DIR}"
+    AITER_DIR "${_aiter_dir}"
+    ARCHS ${QAM_ARCHS}
+    LIBS ${QAM_LIBS}
+    OUT_INCLUDE_DIR _include_dir
+    OUT_LIB_DIR _lib_dir
+    OUT_LIBS _libs
+    OUT_CONFIG_DIR _config_dir)
+
+  # qola_build_modules' PARENT_SCOPE writes land here; re-export to our caller.
+  if(QAM_OUT_INCLUDE_DIR)
+    set(${QAM_OUT_INCLUDE_DIR} "${_include_dir}" PARENT_SCOPE)
+  endif()
+  if(QAM_OUT_LIB_DIR)
+    set(${QAM_OUT_LIB_DIR} "${_lib_dir}" PARENT_SCOPE)
+  endif()
+  if(QAM_OUT_LIBS)
+    set(${QAM_OUT_LIBS} "${_libs}" PARENT_SCOPE)
+  endif()
+  if(QAM_OUT_CONFIG_DIR)
+    set(${QAM_OUT_CONFIG_DIR} "${_config_dir}" PARENT_SCOPE)
+  endif()
+  if(QAM_OUT_AITER_DIR)
+    set(${QAM_OUT_AITER_DIR} "${_aiter_dir}" PARENT_SCOPE)
   endif()
 endfunction()
