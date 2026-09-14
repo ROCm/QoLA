@@ -57,3 +57,9 @@ hsa_subdirs  = ["fmha_v3_bwd"]
 add_blob_gen_cmd = [
     "{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_bwd --output_dir {{}}",
 ]
+
+[libgemm_a4w4_blockscale]
+drop_srcs    = []          # optCompilerConfig entry has no pybind src to drop
+add_srcs     = ["qola/cpp_itfs/qola_gemm_a4w4.cu"]
+add_includes = ["qola/cpp_itfs"]
+hsa_subdirs  = []          # CK XDL instances only; no .co ASM blobs

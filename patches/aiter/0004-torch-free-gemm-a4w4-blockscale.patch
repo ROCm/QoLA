@@ -1,0 +1,1819 @@
+Subject: torch-free gemm_a4w4_blockscale: aiter_tensor_t API, standalone lib, pybind wrappers
+
+diff --git a/aiter/jit/optCompilerConfig.json b/aiter/jit/optCompilerConfig.json
+old mode 100755
+new mode 100644
+index bc2d836cb..951bd28c5
+--- a/aiter/jit/optCompilerConfig.json
++++ b/aiter/jit/optCompilerConfig.json
+@@ -1,10 +1,14 @@
+ {
+-    "module_aiter_enum": {
++    "module_aiter_core": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/aiter_enum_pybind.cu'"
++            "f'{AITER_CSRC_DIR}/pybind/aiter_core_pybind.cu'"
++        ],
++        "flags_extra_cc": [
++            "'-DENABLE_CK=0'"
++        ],
++        "flags_extra_hip": [
++            "'-DENABLE_CK=0'"
+         ],
+-        "flags_extra_cc": [],
+-        "flags_extra_hip": [],
+         "extra_ldflags": "None",
+         "extra_include": [],
+         "verbose": "False",
+@@ -22,9 +26,7 @@
+             "'-DCK_TILE_USE_BUFFER_ADDRESSING_BUILTIN=0'"
+         ],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+@@ -40,44 +42,9 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+-    "module_pa_ragged": {
+-        "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/attention_ragged_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/attention_ragged.cu'"
+-        ],
+-        "flags_extra_cc": [],
+-        "flags_extra_hip": [
+-            "'-DENABLE_FP8'",
+-            "f'-DCK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT={os.environ.get(\"CK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT\", 0)}'"
+-        ],
+-        "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'"
+-        ],
+-        "verbose": "False",
+-        "blob_gen_cmd": "''",
+-        "hipify": "False"
+-    },
+-    "module_pa_v1": {
+-        "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/attention_v1_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/attention_v1.cu'"
+-        ],
+-        "flags_extra_cc": [],
+-        "flags_extra_hip": [
+-            "'-DENABLE_FP8'"
+-        ],
+-        "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'"
+-        ],
+-        "verbose": "False",
+-        "blob_gen_cmd": "''"
+-    },
+     "module_attention_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_pa.cu'",
+-            "f'{AITER_CSRC_DIR}/pybind/attention_asm_pybind.cu'"
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_pa.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -86,22 +53,6 @@
+         "verbose": "False",
+         "blob_gen_cmd": "f'{AITER_META_DIR}/hsa/codegen.py -m pa --output_dir {{}}'"
+     },
+-    "module_pa": {
+-        "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/attention_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/attention.cu'"
+-        ],
+-        "flags_extra_cc": [],
+-        "flags_extra_hip": [
+-            "'-DENABLE_FP8'"
+-        ],
+-        "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'"
+-        ],
+-        "verbose": "False",
+-        "blob_gen_cmd": "''"
+-    },
+     "module_pa_metadata": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/pa_metadata_pybind.cu'",
+@@ -132,8 +83,7 @@
+     },
+     "module_mla_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_mla.cu'",
+-            "f'{AITER_CSRC_DIR}/pybind/attention_asm_mla_pybind.cu'"
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_mla.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -152,18 +102,14 @@
+             "'-DENABLE_FP8'"
+         ],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'",
+-            "f'{AITER_CSRC_DIR}/include/opus'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+     "module_custom_all_reduce": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/custom_all_reduce_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/custom_all_reduce.cu'",
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_communication.cu'"
++            "f'{AITER_CSRC_DIR}/kernels/custom_all_reduce.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -199,7 +145,6 @@
+     },
+     "module_gemm_common": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/gemm_common_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_cu/gemm_common.cu'"
+         ],
+         "flags_extra_cc": [],
+@@ -243,7 +188,9 @@
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_blockscale_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_cu/gemm_common.cu'",
+-            "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gemm_a8w8_blockscale.cu'"
++            "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gemm_a8w8_blockscale.cu'",
++            "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gemm_a8w8_blockscale_lookup_fp16.cu'",
++            "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gemm_a8w8_blockscale_lookup_bf16.cu'"
+         ],
+         "extra_include": [
+             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/include'"
+@@ -316,6 +263,22 @@
+         "hip_clang_path": "os.environ.get('GEMM_A4W4_BLOCKWISE_HIP_CLANG_PATH')",
+         "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_gemm_a4w4_blockscale/gen_instances.py --working_path {{}} --tune_file {AITER_CONFIGS.AITER_CONFIG_GEMM_A4W4_FILE}'"
+     },
++    "libgemm_a4w4_blockscale": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale.cu'"
++        ],
++        "extra_include": [
++            "f'{AITER_CSRC_DIR}/ck_gemm_a4w4_blockscale/include'"
++        ],
++        "flags_extra_hip": [
++            "'-mllvm -greedy-reverse-local-assignment=1'",
++            "'-mllvm --amdgpu-use-amdgpu-trackers=1'"
++        ],
++        "hip_clang_path": "os.environ.get('GEMM_A4W4_BLOCKWISE_HIP_CLANG_PATH')",
++        "is_python_module": "False",
++        "torch_exclude": "True",
++        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_gemm_a4w4_blockscale/gen_instances.py --working_path {{}} --tune_file {AITER_CONFIGS.AITER_CONFIG_GEMM_A4W4_FILE}'"
++    },
+     "module_gemm_a8w8_bpreshuffle": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_bpreshuffle_pybind.cu'",
+@@ -348,6 +311,28 @@
+         "hip_clang_path": "os.environ.get('FLATMM_HIP_CLANG_PATH')",
+         "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_deepgemm/gen_instances.py --working_path {{}}'"
+     },
++    "module_deepgemm_opus": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/opus_gemm_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/opus_gemm/opus_gemm.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-mllvm --amdgpu-mfma-vgpr-form'"
++        ],
++        "flags_extra_hip_per_source": {
++            "*.device.cu": ["-D__HIPCC_RTC__"]
++        },
++        "md_name": "'module_deepgemm_opus'",
++        "extra_ldflags": "None",
++        "extra_include": [
++            "f'{AITER_CSRC_DIR}/opus_gemm/include'"
++        ],
++        "verbose": "False",
++        "is_python_module": "True",
++        "is_standalone": "False",
++        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/opus_gemm/gen_instances.py --working_path {{0}} --tune_files {AITER_ROOT_DIR}/aiter/configs/bf16_tuned_gemm.csv:{AITER_ROOT_DIR}/aiter/configs/model_configs/*_bf16_tuned_gemm.csv --compiled_kids_sidecar={{0}}/../../compiled_kids_opus.json'"
++    },
+     "module_gemm_a8w8_bpreshuffle_cktile": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_bpreshuffle_cktile_pybind.cu'",
+@@ -369,7 +354,6 @@
+     },
+     "module_gemm_a8w8_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_asm_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_gemm_a8w8.cu'"
+         ],
+         "flags_extra_cc": [],
+@@ -381,7 +365,6 @@
+     },
+     "module_gemm_a16w16_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/gemm_a16w16_asm_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_gemm_a16w16.cu'"
+         ],
+         "flags_extra_cc": [],
+@@ -393,7 +376,6 @@
+     },
+     "module_gemm_a4w4_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/gemm_a4w4_asm_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_gemm_a4w4.cu'"
+         ],
+         "flags_extra_cc": [],
+@@ -405,8 +387,7 @@
+     },
+     "module_gemm_a8w8_blockscale_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_flatmm_a8w8_blockscale.cu'",
+-            "f'{AITER_CSRC_DIR}/pybind/flatmm_a8w8_blockscale_asm_pybind.cu'"
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_flatmm_a8w8_blockscale.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -417,8 +398,7 @@
+     },
+     "module_gemm_a8w8_blockscale_bpreshuffle_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_a8w8_blockscale_bpreshuffle.cu'",
+-            "f'{AITER_CSRC_DIR}/pybind/asm_a8w8_blockscale_bpreshuffle_asm_pybind.cu'"
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_a8w8_blockscale_bpreshuffle.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -427,40 +407,48 @@
+         "verbose": "False",
+         "blob_gen_cmd": "f'{AITER_META_DIR}/hsa/codegen.py -m fp8gemm_blockscale --output_dir {{}}'"
+     },
+-    "module_gemm_mi350_a8w8_blockscale_asm": {
++    "module_moe_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_mi350_a8w8_blockscale.cu'",
+-            "f'{AITER_CSRC_DIR}/pybind/asm_mi350_a8w8_blockscale_asm_pybind.cu'"
++            "f'{AITER_CSRC_DIR}/pybind/moe_op_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels_group.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/moe_fused_gate.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/moe_align_block_size_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [
++            "f'{AITER_CSRC_DIR}/include/ck_tile'"
++        ],
++        "verbose": "False"
++    },
++    "module_moe_topksoftmax_asm": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_topksoftmax.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+         "extra_ldflags": "None",
+         "extra_include": [],
+         "verbose": "False",
+-        "blob_gen_cmd": "''"
++        "blob_gen_cmd": [
++            "f'{AITER_META_DIR}/hsa/codegen.py -m topksoftmax --output_dir {{}}'"
++        ]
+     },
+-    "module_moe_asm": {
++    "module_moe_fmoe_asm": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/moe_op_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels_group.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/moe_fused_gate.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/moe_align_block_size_kernels.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmoe.cu'",
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_moe_2stage.cu'",
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_topksoftmax.cu'"
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_moe_2stage.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": [
+             "f'{AITER_META_DIR}/hsa/codegen.py -m fmoe_2stages --output_dir {{}}'",
+-            "f'{AITER_META_DIR}/hsa/codegen.py -m fmoe --output_dir {{}}'",
+-            "f'{AITER_META_DIR}/hsa/codegen.py -m topksoftmax --output_dir {{}}'"
++            "f'{AITER_META_DIR}/hsa/codegen.py -m fmoe --output_dir {{}}'"
+         ]
+     },
+     "module_moe_ck2stages": {
+@@ -536,10 +524,25 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
++    "module_pa_sparse_prefill_opus": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/pa_sparse_prefill_opus_kernels.cu'",
++            "f'{AITER_CSRC_DIR}/pybind/pa_sparse_prefill_opus_pybind.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-ffast-math'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
+     "module_moe_topk": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/moe_topk_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/py_itfs_ck/topk_sigmoid_kernels.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/topk_gating_kernels.cu'",
+             "f'{CK_DIR}/example/ck_tile/09_topk_softmax/topk_softmax_api.cpp'"
+         ],
+         "flags_extra_cc": [],
+@@ -555,8 +558,7 @@
+     "module_norm": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/py_itfs_ck/norm_kernels.cu'",
+-            "f'{AITER_CSRC_DIR}/pybind/norm_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_layernorm.cu'"
++            "f'{AITER_CSRC_DIR}/pybind/norm_pybind.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -604,11 +606,41 @@
+         "flags_extra_cc": [],
+         "flags_extra_hip": [
+             "'-ffast-math'",
+-            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
++            "f'-DOPUS_FP32_to_BF16_DEFAULT={os.environ.get(\"OPUS_FP32_to_BF16_DEFAULT\", 2)}'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_fused_qk_rmsnorm_group_quant": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/kernels/fused_qk_rmsnorm_group_quant.cu'",
++            "f'{AITER_CSRC_DIR}/pybind/fused_qk_rmsnorm_group_quant_pybind.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-ffast-math'",
++            "f'-DOPUS_FP32_to_BF16_DEFAULT={os.environ.get(\"OPUS_FP32_to_BF16_DEFAULT\", 2)}'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [
++            "f'{AITER_CSRC_DIR}/include/opus'"
++        ],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_gated_rmsnorm_quant": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/kernels/gated_rmsnorm_quant_kernels.cu'",
++            "f'{AITER_CSRC_DIR}/pybind/gated_rmsnorm_quant_pybind.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-ffast-math'"
+         ],
+         "extra_ldflags": "None",
+         "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'",
+             "f'{AITER_CSRC_DIR}/include/opus'"
+         ],
+         "verbose": "False",
+@@ -784,18 +816,27 @@
+     "module_quant": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/quant_pybind.cu'",
+-            "f'{AITER_CSRC_DIR}/kernels/quant_kernels.cu'"
++            "f'{AITER_CSRC_DIR}/kernels/quant_kernels.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/quant_mxfp4.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [
+-            "'-DENABLE_FP8'",
+-            "'-DCK_TILE_USE_BUFFER_ADDRESSING_BUILTIN=0'"
++            "'-DENABLE_FP8'"
+         ],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'",
+-            "f'{AITER_CSRC_DIR}/include/opus'"
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_dsv4_rotate_quant": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/dsv4_rotate_quant_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/dsv4_rotate_quant.cu'"
+         ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+@@ -815,11 +856,167 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+-    "module_rope_general_fwd": {
++    "module_rope_1c_uncached_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_uncached_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_uncached_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_2c_uncached_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_2c_uncached_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_2c_uncached_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_cached_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_cached_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_cached_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_2c_cached_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_2c_cached_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_2c_cached_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_thd_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_thd_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_thd_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_2d_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_2d_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_2d_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_uncached_bwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_uncached_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_uncached_bwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_2c_uncached_bwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_2c_uncached_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_2c_uncached_bwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_cached_bwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_cached_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_cached_bwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_2c_cached_bwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_2c_cached_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_2c_cached_bwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_thd_bwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_thd_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_thd_bwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_2d_bwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_general_1c_2d_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_2d_bwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_1c_cached_positions_fwd": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/rope_general_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/pybind/rope_1c_cached_positions_fwd_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
+-            "f'{AITER_CSRC_DIR}/kernels/rope/general_fwd_kernels.cu'"
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_cached_positions_fwd_kernels.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -828,11 +1025,11 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+-    "module_rope_general_bwd": {
++    "module_rope_2c_cached_positions_fwd": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/rope_general_bwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/pybind/rope_2c_cached_positions_fwd_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
+-            "f'{AITER_CSRC_DIR}/kernels/rope/general_bwd_kernels.cu'"
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_2c_cached_positions_fwd_kernels.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -841,11 +1038,24 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+-    "module_rope_pos_fwd": {
++    "module_rope_1c_cached_positions_offsets_fwd": {
+         "srcs": [
+-            "f'{AITER_CSRC_DIR}/pybind/rope_pos_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/pybind/rope_1c_cached_positions_offsets_fwd_pybind.cu'",
+             "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
+-            "f'{AITER_CSRC_DIR}/kernels/rope/pos_fwd_kernels.cu'"
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_1c_cached_positions_offsets_fwd_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_rope_2c_cached_positions_offsets_fwd": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/rope_2c_cached_positions_offsets_fwd_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
++            "f'{AITER_CSRC_DIR}/kernels/rope/general_2c_cached_positions_offsets_fwd_kernels.cu'"
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+@@ -867,9 +1077,27 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
++    "module_fused_qknorm_idxrqknorm": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/fused_qknorm_idxrqknorm_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/fused_qknorm_idxrqknorm.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-DENABLE_FP8'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [
++            "f'{AITER_CSRC_DIR}/include/ck_tile'",
++            "f'{AITER_CSRC_DIR}/include/opus'"
++        ],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
+     "module_fused_qk_norm_rope_cache_quant_shuffle": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/fused_qk_norm_rope_cache_quant_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/fused_qk_norm.cu'",
+             "f'{AITER_CSRC_DIR}/kernels/rope/rope_common.h'",
+             "f'{AITER_CSRC_DIR}/kernels/fused_qk_norm_rope_cache_quant.cu'"
+         ],
+@@ -879,11 +1107,57 @@
+         ],
+         "extra_ldflags": "None",
+         "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'"
++            "f'{AITER_CSRC_DIR}/include/ck_tile'",
++            "f'{AITER_CSRC_DIR}/include/opus'"
+         ],
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
++    "module_fmha_fwd_with_sink_asm": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmha_fwd_with_sink.cu'"
++        ],
++        "flags_extra_cc": [
++            "'-DENABLE_CK=0'"
++        ],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": [
++            "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_fwd_bf16 --output_dir {{}}'"
++        ]
++    },
++    "module_fmha_fwd_with_sink_varlen_asm": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmha_fwd_with_sink_varlen.cu'"
++        ],
++        "flags_extra_cc": [
++            "'-DENABLE_CK=0'"
++        ],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": [
++            "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_fwd_bf16_varlen --output_dir {{}}'"
++        ]
++    },
++    "module_pa_decode_bf16_asm": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_pa_decode_bf16.cu'"
++        ],
++        "flags_extra_cc": [
++            "'-DENABLE_CK=0'"
++        ],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": [
++            "f'{AITER_META_DIR}/hsa/codegen.py -m pa_decode_bf16 --output_dir {{}}'"
++        ]
++    },
+     "module_fmha_v3_fwd": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/kernels/mha_common.cu'",
+@@ -892,16 +1166,12 @@
+             "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd.cu'"
+         ],
+         "flags_extra_cc": [
+-            "'-DFAV3_ON=1'"
+-        ],
+-        "flags_extra_hip": [
+-            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+-            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
++            "'-DFAV3_ON=1'",
++            "'-DENABLE_CK=0'"
+         ],
++        "flags_extra_hip": [],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{CK_DIR}/example/ck_tile/01_fmha'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": [
+             "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_fwd --output_dir {{}}'"
+@@ -918,6 +1188,7 @@
+             "'-DFAV2_ON=1'"
+         ],
+         "flags_extra_hip": [
++            "'-fbracket-depth=1024'",
+             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+             "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
+         ],
+@@ -943,6 +1214,7 @@
+             "'-DFAV2_ON=1'"
+         ],
+         "flags_extra_hip": [
++            "'-fbracket-depth=1024'",
+             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+             "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'",
+             "f'-DCK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT={os.environ.get(\"CK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT\", 0)}'"
+@@ -967,6 +1239,7 @@
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [
++            "'-fbracket-depth=1024'",
+             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+             "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'",
+             "f'-DCK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT={os.environ.get(\"CK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT\", 0)}'",
+@@ -989,15 +1262,12 @@
+             "f'{AITER_CSRC_DIR}/pybind/mha_bwd_asm_pybind.cu'"
+         ],
+         "flags_extra_cc": [
+-            "'-DONLY_FAV3=1'"
+-        ],
+-        "flags_extra_hip": [
+-            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'"
++            "'-DONLY_FAV3=1'",
++            "'-DENABLE_CK=0'"
+         ],
++        "flags_extra_hip": [],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{CK_DIR}/example/ck_tile/01_fmha'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": [
+             "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_bwd --output_dir {{}}'"
+@@ -1011,15 +1281,12 @@
+             "f'{AITER_CSRC_DIR}/pybind/mha_varlen_bwd_asm_pybind.cu'"
+         ],
+         "flags_extra_cc": [
+-            "'-DONLY_FAV3=1'"
+-        ],
+-        "flags_extra_hip": [
+-            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'"
++            "'-DONLY_FAV3=1'",
++            "'-DENABLE_CK=0'"
+         ],
++        "flags_extra_hip": [],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{CK_DIR}/example/ck_tile/01_fmha'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": [
+             "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_bwd --output_dir {{}}'"
+@@ -1033,15 +1300,12 @@
+             "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd.cu'"
+         ],
+         "flags_extra_cc": [
+-            "'-DFAV3_ON=1'"
+-        ],
+-        "flags_extra_hip": [
+-            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'"
++            "'-DFAV3_ON=1'",
++            "'-DENABLE_CK=0'"
+         ],
++        "flags_extra_hip": [],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{CK_DIR}/example/ck_tile/01_fmha'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": [
+             "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_fwd --output_dir {{}}'"
+@@ -1056,6 +1320,7 @@
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [
++            "'-fbracket-depth=1024'",
+             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+             "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
+         ],
+@@ -1079,6 +1344,7 @@
+         ],
+         "flags_extra_cc": [],
+         "flags_extra_hip": [
++            "'-fbracket-depth=1024'",
+             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+             "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
+         ],
+@@ -1216,6 +1482,26 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
++    "module_hk_mla": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/mla_hk_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk_decode_fwd.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk/hk_mla_utils.cuh'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk/hk_mla_buffer_managers.cuh'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk/hk_mla_softmax.cuh'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk/mi3xx_v32_fwd_decode_m16x8_fp8_fp8.cuh'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk/mi35x_v32_fwd_decode_m16x8_fp8_fp8.cuh'",
++            "f'{AITER_CSRC_DIR}/kernels/mla/hk/mi35x_v32_fwd_decode_m16x4_fp8_fp8.cuh'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''",
++        "third_party": ["'HipKittens'", "'ComposableKernel'"],
++        "is_experimental": "True"
++    },
+     "module_topk_plain": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/topk_plain_pybind.cu'",
+@@ -1241,6 +1527,22 @@
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
++    "module_fused_ar_mhc": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/fused_ar_mhc_post_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/fused_ar_mhc_post.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/custom_all_reduce.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mhc_kernels.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-DAITER_FUSED_AR_MHC_MODULE'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
+     "module_mhc": {
+         "srcs": [
+             "f'{AITER_CSRC_DIR}/pybind/mhc_pybind.cu'",
+@@ -1249,10 +1551,7 @@
+         "flags_extra_cc": [],
+         "flags_extra_hip": [],
+         "extra_ldflags": "None",
+-        "extra_include": [
+-            "f'{AITER_CSRC_DIR}/include/ck_tile'",
+-            "f'{AITER_CSRC_DIR}/include/opus'"
+-        ],
++        "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": "''"
+     },
+@@ -1267,5 +1566,54 @@
+         "extra_include": [],
+         "verbose": "False",
+         "blob_gen_cmd": "''"
++    },
++    "module_mha_fwd_native_splitkv": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/mha_fwd_native_splitkv_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mha_native/mha_fwd_native_splitkv.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_combine.cu'"
++        ],
++        "flags_extra_cc": [],
++        "flags_extra_hip": [
++            "'-mllvm -enable-post-misched=1'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [
++            "f'{AITER_CSRC_DIR}/kernels/mha_native'"
++        ],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_fused_split_gdr_update": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/fused_split_gdr_update_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/fused_split_gdr_update.cu'"
++        ],
++        "flags_extra_cc": [
++        ],
++        "flags_extra_hip": [
++            "'-ffast-math'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
++    },
++    "module_chunk_gdr_fwd_h": {
++        "srcs": [
++            "f'{AITER_CSRC_DIR}/pybind/chunk_gated_delta_rule_fwd_h_pybind.cu'",
++            "f'{AITER_CSRC_DIR}/kernels/chunk_gated_delta_rule_fwd_h.cu'"
++        ],
++        "flags_extra_cc": [
++        ],
++        "flags_extra_hip": [
++            "'-ffast-math'"
++        ],
++        "extra_ldflags": "None",
++        "extra_include": [],
++        "verbose": "False",
++        "blob_gen_cmd": "''"
+     }
+ }
+diff --git a/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale.cu b/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale.cu
+index 3fc338587..c475b3f10 100755
+--- a/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale.cu
++++ b/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale.cu
+@@ -1,108 +1,99 @@
+ // SPDX-License-Identifier: MIT
+-// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
++// Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
++
++#include <string>
++#include <string_view>
++#include <unordered_map>
++
++#include "gemm_a4w4_blockscale.h"
+ 
+ #include "gemm_a4w4_blockscale_common.cuh"
+-#include "gemm_a4w4_blockscale_manifest.h"
+ #include "gemm_a4w4_blockscale_lookup.h"
+-#include "gemm_common.h"
+-#include <cmath>
++#include "gemm_a4w4_blockscale_manifest.h"
+ 
+-using BlockwiseKernel = std::function<
+-    torch::Tensor(torch::Tensor &, torch::Tensor &,
+-                  torch::Tensor &, torch::Tensor &,
+-                  torch::Tensor &, int)>;
++using BlockwiseKernel = aiter_tensor_t& (*)(
++    aiter_tensor_t&, aiter_tensor_t&, aiter_tensor_t&, aiter_tensor_t&, aiter_tensor_t&,
++    int, hipStream_t);
+ 
+-// Define a custom hash function for std::tuple<int, int, int>
+-struct IntTupleHash
+-{
+-  size_t operator()(const std::tuple<int, int, int> &t) const
+-  {
+-    auto hash1 = std::hash<int>{}(std::get<0>(t));
+-    auto hash2 = std::hash<int>{}(std::get<1>(t));
+-    auto hash3 = std::hash<int>{}(std::get<2>(t));
+-    return hash1 ^ hash2 ^ hash3;
+-  }
+-};
+-
+-using BlockwiseKernelMap = std::unordered_map<
+-    std::tuple<int, int, int>,
+-    BlockwiseKernel,
+-    IntTupleHash>;
++// Name-keyed dispatch table; see gemm_a8w8_blockscale.cu for the rationale
++// behind std::string_view keys + raw fn-ptr values (constant-init into
++// .data.rel.ro, matching PR #3255's GemmDispatchMap style).
++//
++// Note: the a4w4 tuned CSV mixes CK and ASM kernels; the ASM rows are
++// filtered out at codegen (see csrc/ck_gemm_a4w4_blockscale/gen_instances.py)
++// and dispatched separately by aiter/ops/gemm_op_a4w4.py based on the
++// kernelName prefix (_ZN... = mangled ASM symbol).  This map only contains
++// CK kernels.
++using BlockwiseKernelMap = std::unordered_map<std::string_view, BlockwiseKernel>;
+ 
++// Python-driven name-keyed dispatch (see gemm_a8w8_blockscale.cu for the
++// rationale).  Empty kernelName -> default heuristic; non-empty but unknown
++// kernelName -> hard error.
+ template <typename CDataType>
+-BlockwiseKernel blockscale_dispatch(int M, int N, int K)
++BlockwiseKernel blockscale_dispatch(const std::string& kernelName)
+ {
+-    // For a given shape, either find the best kernel via lookup or heuristic.
+-    // For many small M shapes, we bucket them to the next largest kernel.
+-    // This is fine since kernels are padded anyway.
+-
+-    static const auto lookup = []
+-    {
+-      if constexpr (std::is_same_v<CDataType, F16>) {
+-          return BlockwiseKernelMap{GENERATE_LOOKUP_TABLE(F16)};
+-      } else if constexpr (std::is_same_v<CDataType, B16>) {
+-          return BlockwiseKernelMap{GENERATE_LOOKUP_TABLE(B16)};
+-      } else {
+-          static_assert(false, "blockscale_dispatch used with unsupported dtype!");
+-      } }();
++    static const auto lookup = [] {
++        if constexpr(std::is_same_v<CDataType, F16>)
++        {
++            return BlockwiseKernelMap{GENERATE_LOOKUP_TABLE(F16)};
++        }
++        else if constexpr(std::is_same_v<CDataType, B16>)
++        {
++            return BlockwiseKernelMap{GENERATE_LOOKUP_TABLE(B16)};
++        }
++        else
++        {
++            static_assert(false, "blockscale_dispatch used with unsupported dtype!");
++        }
++    }();
+ 
+-    // First check if this shape(M,N,K) is available in the direct lookup.
+-    auto it = lookup.find({M, N, K});
+-    // If we found an optimal kernel, use it.
+-    if (it != lookup.end())
++    if(!kernelName.empty())
+     {
+-      return it->second;
++        auto it = lookup.find(std::string_view{kernelName});
++        if(it != lookup.end())
++        {
++            return it->second;
++        }
++        AITER_CHECK(false,
++                    "gemm_a4w4_blockscale kernel '",
++                    kernelName,
++                    "' is not present in the compiled registry. The tuned CSV references a "
++                    "kernel that was not built into aiter. Rebuild aiter (or remove this row "
++                    "from aiter/configs/a4w4_blockscale_tuned_gemm.csv) and try again.");
+     }
+ 
+-    int padded_m = M;
+-    // Fine-grained search
+-    padded_m = getPaddedM(M, N, K, 0);
++    // Default heuristic kernel (used when Python had no tuned row).
++    return a4w4_blockscale_256x64x128x128_16x16_16x16_8x32x1_8x32x1_1x32x1x8_8_2x2_intrawave_v3<
++        CDataType>;
++}
++
++namespace aiter {
++
++aiter_tensor_t& gemm_a4w4_blockscale(aiter_tensor_t& XQ,
++                                      aiter_tensor_t& WQ,
++                                      aiter_tensor_t& x_scale,
++                                      aiter_tensor_t& w_scale,
++                                      aiter_tensor_t& Y,
++                                      int splitK,
++                                      hipStream_t stream,
++                                      std::string kernelName)
++{
++    AITER_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
++    AITER_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
+ 
+-    // Second check if this shape(padded_m,N,K) is available in the direct lookup.
+-    it = lookup.find({padded_m, N, K});
+-    // If we found an optimal kernel, use it.
+-    if (it != lookup.end())
++    if(Y.dtype() == AITER_DTYPE_fp16)
++    {
++        blockscale_dispatch<F16>(kernelName)(XQ, WQ, x_scale, w_scale, Y, splitK, stream);
++    }
++    else if(Y.dtype() == AITER_DTYPE_bf16)
+     {
+-      return it->second;
++        blockscale_dispatch<B16>(kernelName)(XQ, WQ, x_scale, w_scale, Y, splitK, stream);
+     }
+-    // Coarse-grained search
+-    padded_m = getPaddedM(M, N, K, 1);
+-    it = lookup.find({padded_m, N, K});
+-    if (it != lookup.end())
++    else
+     {
+-      return it->second;
++        AITER_CHECK(false, "Unsupported scales/output dtype!");
+     }
+-    // Otherwise, use heuristics.
+-    return a4w4_blockscale_256x64x128x128_16x16_16x16_8x32x1_8x32x1_1x32x1x8_8_2x2_intrawave_v3<CDataType>;
++    return Y;
+ }
+ 
+-torch::Tensor gemm_a4w4_blockscale(
+-    torch::Tensor& XQ,
+-    torch::Tensor& WQ,
+-    torch::Tensor& x_scale,
+-    torch::Tensor& w_scale,
+-    torch::Tensor& Y,
+-    int splitK)
+-{
+-    TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
+-    TORCH_CHECK(x_scale.dtype() == w_scale.dtype(),
+-                "Scales should have the same dtype!");
+-
+-  int M = XQ.size(0);
+-  int N = WQ.size(0);
+-  int K = XQ.size(1) * 2; // always fp4_x2
+-
+-  if (Y.dtype() == at::ScalarType::Half)
+-  {
+-    blockscale_dispatch<F16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y, splitK);
+-  }
+-  else if (Y.dtype() == at::ScalarType::BFloat16)
+-  {
+-    blockscale_dispatch<B16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y, splitK);
+-  }
+-  else
+-  {
+-    TORCH_CHECK(false, "Unsupported scales/output dtype!");
+-  }
+-  return Y;
+-}
++} // namespace aiter
+diff --git a/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale_tune.cu b/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale_tune.cu
+index 561651bf3..7c2461e0f 100755
+--- a/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale_tune.cu
++++ b/csrc/ck_gemm_a4w4_blockscale/gemm_a4w4_blockscale_tune.cu
+@@ -1,15 +1,16 @@
+ // SPDX-License-Identifier: MIT
+ // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+ 
++#include "gemm_a4w4_blockscale.h"
++
+ #include "gemm_a4w4_blockscale_common.cuh"
+ #include "gemm_a4w4_blockscale_manifest.h"
+ #include "gemm_a4w4_blockscale_lookup.h"
+ #include <string>
+ 
+-using BlockwiseKernel = std::function<
+-    torch::Tensor(torch::Tensor &, torch::Tensor &,
+-                  torch::Tensor &, torch::Tensor &,
+-                  torch::Tensor &, int)>;
++using BlockwiseKernel = aiter_tensor_t& (*)(
++    aiter_tensor_t&, aiter_tensor_t&, aiter_tensor_t&, aiter_tensor_t&, aiter_tensor_t&,
++    int, hipStream_t);
+ 
+ // For certain high priority shapes, we directly use the best kernel rather
+ // than use heuristics.
+@@ -43,8 +44,8 @@ BlockwiseKernel blockwise_dispatch(int id)
+         static_assert(false, "blockwise_dispatch used with unsupported dtype!");
+     } }();
+ 
+-  TORCH_CHECK(id < lookup.size(),
+-              "Kernel id " + std::to_string(id)  +" is out of range!");
++  AITER_CHECK(id < (int)lookup.size(),
++              "Kernel id ", id, " is out of range!");
+   auto it = lookup.find(id);
+   // If we found an optimal kernel, use it.
+   if (it != lookup.end())
+@@ -55,36 +56,34 @@ BlockwiseKernel blockwise_dispatch(int id)
+   return lookup.find(0)->second;
+ }
+ 
+-torch::Tensor gemm_a4w4_blockscale_tune(
+-    torch::Tensor &XQ,
+-    torch::Tensor &WQ,
+-    torch::Tensor &x_scale,
+-    torch::Tensor &w_scale,
+-    torch::Tensor &Y,
++namespace aiter {
++
++aiter_tensor_t& gemm_a4w4_blockscale_tune(
++    aiter_tensor_t& XQ,
++    aiter_tensor_t& WQ,
++    aiter_tensor_t& x_scale,
++    aiter_tensor_t& w_scale,
++    aiter_tensor_t& Y,
+     int kernelId,
+-    int splitK)
++    int splitK,
++    hipStream_t stream)
+ {
+-  TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
+-  TORCH_CHECK( x_scale.dtype() == w_scale.dtype(),
+-              "Scales should have the same dtype!");
+-  std::optional<torch::Tensor> bias = std::nullopt;
++  AITER_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
++  AITER_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
+ 
+-  int M = XQ.size(0);
+-  int N = WQ.size(0);
+-  int K = XQ.size(1);
+-  int KBatch = std::pow(2, splitK);
+-
+-  if (Y.dtype() == at::ScalarType::Half)
++  if (Y.dtype() == AITER_DTYPE_fp16)
+   {
+-    blockwise_dispatch<F16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, splitK);
++    blockwise_dispatch<F16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, splitK, stream);
+   }
+-  else if (Y.dtype() == at::ScalarType::BFloat16)
++  else if (Y.dtype() == AITER_DTYPE_bf16)
+   {
+-    blockwise_dispatch<B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, splitK);
++    blockwise_dispatch<B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, splitK, stream);
+   }
+   else
+   {
+-    TORCH_CHECK(false, "Unsupported scales/output dtype!");
++    AITER_CHECK(false, "Unsupported scales/output dtype!");
+   }
+   return Y;
+ }
++
++} // namespace aiter
+diff --git a/csrc/ck_gemm_a4w4_blockscale/gen_instances.py b/csrc/ck_gemm_a4w4_blockscale/gen_instances.py
+index 9e9da1346..5570005fe 100755
+--- a/csrc/ck_gemm_a4w4_blockscale/gen_instances.py
++++ b/csrc/ck_gemm_a4w4_blockscale/gen_instances.py
+@@ -2,15 +2,32 @@
+ # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+ import argparse
+ import os
++import sys
+ import shutil
+ from pathlib import Path
+ 
+ import pandas as pd
+-import torch
+-from gemm_a4w4_blockscale_common import (
++
++this_dir = os.path.dirname(os.path.abspath(__file__))
++AITER_CORE_DIR = (
++    os.path.join(os.path.abspath(f"{this_dir}/../../../"), "aiter/jit/utils")
++    if os.path.exists(
++        os.path.join(os.path.abspath(f"{this_dir}/../../../"), "aiter_meta")
++    )
++    else os.path.abspath(f"{this_dir}/../../aiter/jit/utils")
++)
++sys.path.insert(0, AITER_CORE_DIR)
++from chip_info import (  # noqa: E402
++    build_tune_dict,
++    write_lookup_header,
++    write_name_keyed_lookup_header,
++)
++
++from gemm_a4w4_blockscale_common import (  # noqa: E402
+     default_kernels_dict,
+     kernelInstance,
+     kernels_list,
++    kernels_by_name,
+ )
+ 
+ """
+@@ -34,20 +51,21 @@ class gemm_a4w4_blockscale_codegen:
+ #include "gemm_a4w4_blockscale_common.cuh"
+ 
+ template <typename CDataType>
+-torch::Tensor
++aiter_tensor_t&
+ {k.name}(
+-    torch::Tensor &XQ,
+-    torch::Tensor &WQ,
+-    torch::Tensor &x_scale,
+-    torch::Tensor &w_scale,
+-    torch::Tensor &Y,
+-    int splitK
++    aiter_tensor_t &XQ,
++    aiter_tensor_t &WQ,
++    aiter_tensor_t &x_scale,
++    aiter_tensor_t &w_scale,
++    aiter_tensor_t &Y,
++    int splitK,
++    hipStream_t stream
+     )
+ {{{{
+     // The smallest kernel we have available. Works well for memory bound shapes.
+ 
+     // Check if this input needs to be padded.
+-    int M = size_to_dim_(XQ.dim() - 1, XQ.sizes());
++    int M = XQ.size(0); // 2D: [M, K/2]
+     int N = WQ.size(0);
+     int K = WQ.size(1);
+     // TODO - padding
+@@ -74,7 +92,7 @@ torch::Tensor
+             ck::BlockGemmPipelineVersion::v{k.PIPELINE_VERSION},
+             ck::tensor_operation::device::GemmSpecialization::{{GemmSpec}}>;
+         // Run kernel instance.
+-        return gemm_a4w4_blockscale_impl<CDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y, splitK);
++        return gemm_a4w4_blockscale_impl<CDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y, splitK, stream);
+ """
+         if self.istune:
+             INSTANCE_IMPL_str = INSTANCE_IMPL.format(
+@@ -104,14 +122,15 @@ torch::Tensor
+ 
+ #include "impl/{name}.cuh"
+ 
+-template torch::Tensor
++template aiter_tensor_t&
+ {name}<{dtypes}>(
+-    torch::Tensor &XQ,
+-    torch::Tensor &WQ,
+-    torch::Tensor &x_scale,
+-    torch::Tensor &w_scale,
+-    torch::Tensor &Y,
+-    int splitK
++    aiter_tensor_t &XQ,
++    aiter_tensor_t &WQ,
++    aiter_tensor_t &x_scale,
++    aiter_tensor_t &w_scale,
++    aiter_tensor_t &Y,
++    int splitK,
++    hipStream_t stream
+     );
+ 
+ """
+@@ -135,7 +154,16 @@ template torch::Tensor
+             ).write_text(INSTANCE_dFP32_eFP16)
+ 
+     def gen_lookup_dict(self, kernels_dict):
+-        LOOKUP_head = """#pragma once
++        """Generate the dispatch lookup header.
++
++        - Tune mode: kernelId-keyed table for *_tune.cu (unchanged).
++        - Non-tune mode: name-keyed registry for the Python-driven dispatch
++          in gemm_a4w4_blockscale.cu.
++        """
++        output_path = os.path.join(self.working_path, "gemm_a4w4_blockscale_lookup.h")
++
++        if self.istune:
++            LOOKUP_head = """#pragma once
+ // SPDX-License-Identifier: MIT
+ // Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+ 
+@@ -144,33 +172,49 @@ template torch::Tensor
+ #define GENERATE_LOOKUP_TABLE(CTYPE)                                                                                      \\
+    {                                                                                                                             \\"""
+ 
+-        LOOKUP_template = """
++            LOOKUP_template = """
+        {{{MNK},                                                                                                       \\
+         {kernel_name}<CTYPE>}},                       \\"""
+ 
+-        LOOKUP_end = """
++            LOOKUP_end = """
+    }
+ 
+ #endif // USE_ROCM
+ """
+-        with open(
+-            os.path.join(self.working_path, "gemm_a4w4_blockscale_lookup.h"), "w"
+-        ) as f:
+-            f.write(LOOKUP_head)
+-            for mnk, k in kernels_dict.items():
+-                # print((", ").join(map(lambda x: str(x), list(mnk))), ":", k.name)
+-                if not self.istune and (isinstance(mnk, tuple) and mnk[0] > 0):
+-                    f.write(
+-                        LOOKUP_template.format(
+-                            MNK="{"
+-                            + (", ").join(map(lambda x: str(x), list(mnk)))
+-                            + "}",
+-                            kernel_name=k.name,
+-                        )
+-                    )
+-                elif self.istune and isinstance(mnk, int):
+-                    f.write(LOOKUP_template.format(MNK=mnk, kernel_name=k.name))
+-            f.write(LOOKUP_end)
++            write_lookup_header(
++                output_path,
++                kernels_dict,
++                LOOKUP_head,
++                LOOKUP_template,
++                LOOKUP_end,
++                self.istune,
++            )
++        else:
++            LOOKUP_head = """#pragma once
++// SPDX-License-Identifier: MIT
++// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
++
++#ifdef USE_ROCM
++
++#define GENERATE_LOOKUP_TABLE(CTYPE)                                                                                      \\
++   {                                                                                                                             \\"""
++
++            LOOKUP_template = """
++       {{"{kernel_name}",                                                                                                       \\
++        {kernel_name}<CTYPE>}},                       \\"""
++
++            LOOKUP_end = """
++   }
++
++#endif // USE_ROCM
++"""
++            write_name_keyed_lookup_header(
++                output_path,
++                kernels_dict,
++                LOOKUP_head,
++                LOOKUP_template,
++                LOOKUP_end,
++            )
+ 
+     def gen_manifest_head(self, kernels_dict):
+         MAINFEST_head = """#pragma once
+@@ -180,19 +224,20 @@ template torch::Tensor
+ #ifdef USE_ROCM
+ 
+ #include <cstdlib>
+-
+-#include <torch/extension.h>
++#include <hip/hip_runtime.h>
++#include "aiter_tensor.h"
+ """
+         MAINFEST_template = """
+ template <typename CDataType>
+-torch::Tensor
++aiter_tensor_t&
+ {kernel_name}(
+-    torch::Tensor &XQ,
+-    torch::Tensor &WQ,
+-    torch::Tensor &x_scale,
+-    torch::Tensor &w_scale,
+-    torch::Tensor &Y,
+-    int splitK);
++    aiter_tensor_t &XQ,
++    aiter_tensor_t &WQ,
++    aiter_tensor_t &x_scale,
++    aiter_tensor_t &w_scale,
++    aiter_tensor_t &Y,
++    int splitK,
++    hipStream_t stream);
+ """
+         MAINFEST_end = """
+ 
+@@ -223,23 +268,23 @@ torch::Tensor
+ 
+ 
+ def get_tune_dict(tune_dict_csv):
+-    tune_dict = default_kernels_dict
+     if os.path.exists(tune_dict_csv):
+-        tune_df = pd.read_csv(tune_dict_csv)
+-        if torch.cuda.is_available():
+-            gpu = torch.cuda.current_device()
+-            device_properties = torch.cuda.get_device_properties(gpu)
+-            cu_num = device_properties.multi_processor_count
+-            tune_df = tune_df[tune_df["cu_num"] == cu_num].reset_index()
+-        for i in range(len(tune_df)):
+-            M = tune_df.loc[i, "M"]
+-            N = tune_df.loc[i, "N"]
+-            K = tune_df.loc[i, "K"]
+-            kid = tune_df.loc[i, "kernelId"]
+-            if kid < 0 or kid > len(kernels_list):
+-                continue
+-            tune_dict[(M, N, K)] = kernels_list[kid]
+-    return tune_dict
++        df = pd.read_csv(tune_dict_csv)
++        # The a4w4 tuned CSV mixes CK kernels and ASM kernels in one file with
++        # no libtype column.  The Python dispatcher in
++        # aiter/ops/gemm_op_a4w4.py routes ASM rows by
++        # kernelName.startswith("_ZN") (mangled C++ symbol of the ASM kernel);
++        # apply the same filter here so the CK codegen sees only CK rows and
++        # build_tune_dict's strict validation stays effective on genuine CK
++        # references.
++        df = df[~df["kernelName"].astype(str).str.startswith("_ZN")]
++        return build_tune_dict(
++            df,
++            default_kernels_dict,
++            kernels_list,
++            kernels_by_name=kernels_by_name,
++        )
++    return default_kernels_dict
+ 
+ 
+ if __name__ == "__main__":
+diff --git a/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale.h b/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale.h
+index c9a53fefb..220dca672 100644
+--- a/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale.h
++++ b/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale.h
+@@ -1,19 +1,30 @@
+ #pragma once
+ // SPDX-License-Identifier: MIT
+ // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+-#include <torch/all.h>
+-#include <torch/extension.h>
+-torch::Tensor gemm_a4w4_blockscale(torch::Tensor& A,
+-                                   torch::Tensor& B,
+-                                   torch::Tensor& a_scale,
+-                                   torch::Tensor& b_scale,
+-                                   torch::Tensor& C,
+-                                   int splitK);
++#include "aiter_tensor.h"
++#include <hip/hip_runtime.h>
++#include <string>
+ 
+-torch::Tensor gemm_a4w4_blockscale_tune(torch::Tensor& XQ,
+-                                        torch::Tensor& WQ,
+-                                        torch::Tensor& x_scale,
+-                                        torch::Tensor& w_scale,
+-                                        torch::Tensor& Y,
+-                                        int kernelId,
+-                                        int splitK);
++namespace aiter {
++
++__attribute__((visibility("default")))
++aiter_tensor_t& gemm_a4w4_blockscale(aiter_tensor_t& XQ,
++                                      aiter_tensor_t& WQ,
++                                      aiter_tensor_t& x_scale,
++                                      aiter_tensor_t& w_scale,
++                                      aiter_tensor_t& Y,
++                                      int splitK,
++                                      hipStream_t stream,
++                                      std::string kernelName = "");
++
++__attribute__((visibility("default")))
++aiter_tensor_t& gemm_a4w4_blockscale_tune(aiter_tensor_t& XQ,
++                                           aiter_tensor_t& WQ,
++                                           aiter_tensor_t& x_scale,
++                                           aiter_tensor_t& w_scale,
++                                           aiter_tensor_t& Y,
++                                           int kernelId,
++                                           int splitK,
++                                           hipStream_t stream);
++
++} // namespace aiter
+diff --git a/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale_common.cuh b/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale_common.cuh
+index 1322798f2..bbcc8e912 100755
+--- a/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale_common.cuh
++++ b/csrc/ck_gemm_a4w4_blockscale/include/gemm_a4w4_blockscale_common.cuh
+@@ -6,31 +6,19 @@
+ #undef __HIP_NO_HALF_OPERATORS__
+ #undef __HIP_NO_HALF_CONVERSIONS__
+ 
+-#include <iostream>
+-#include <numeric>
+-#include <initializer_list>
+ #include <cstdlib>
+ 
+-#include <ATen/ATen.h>
+-#include <torch/extension.h>
+-#include <ATen/hip/HIPContext.h>
+-#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
+-#include <ATen/hip/impl/HIPStreamMasqueradingAsCUDA.h>
++#include "aiter_hip_common.h"
++#include "aiter_tensor.h"
+ 
+ #include "ck/ck.hpp"
+ #include "ck/tensor_operation/gpu/device/tensor_layout.hpp"
+ #include "ck/tensor_operation/gpu/element/unary_element_wise_operation.hpp"
+ #include "ck/tensor_operation/gpu/device/gemm_specialization.hpp"
+ #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3_mx.hpp"
+-#include "ck/library/utility/host_tensor_generator.hpp"
+ #include "ck/utility/blkgemmpipe_scheduler.hpp"
+ #include "ck/utility/data_type.hpp"
+ #include "ck/utility/sequence.hpp"
+-#include "ck/library/reference_tensor_operation/cpu/reference_mx_gemm.hpp"
+-#include "ck/library/utility/check_err.hpp"
+-#include "ck/library/utility/device_memory.hpp"
+-#include "ck/library/utility/fill.hpp"
+-#include "ck/library/utility/host_tensor.hpp"
+ 
+ template <ck::index_t... Is>
+ using S = ck::Sequence<Is...>;
+@@ -112,14 +100,17 @@ using DeviceGemmHelperF4BlockScale = ck::tensor_operation::device::DeviceGemmMX_
+ // clang-format on
+ 
+ template <typename CDataType, typename DeviceGemmInstance>
+-__forceinline__ torch::Tensor gemm_a4w4_blockscale_impl(
+-    torch::Tensor &A,
+-    torch::Tensor &B,
+-    torch::Tensor &a_scale,
+-    torch::Tensor &b_scale,
+-    torch::Tensor &C,
+-    int splitK)
++__forceinline__ aiter_tensor_t& gemm_a4w4_blockscale_impl(
++    aiter_tensor_t& A,
++    aiter_tensor_t& B,
++    aiter_tensor_t& a_scale,
++    aiter_tensor_t& b_scale,
++    aiter_tensor_t& C,
++    int splitK,
++    hipStream_t stream)
+ {
++    HipDeviceGuard guard(A.device_id);
++
+     int M = A.size(0);
+     int N = B.size(0);
+     int K = A.size(1) * 2; // always fp4_x2
+@@ -137,7 +128,6 @@ __forceinline__ torch::Tensor gemm_a4w4_blockscale_impl(
+     auto b_element_op = BElementOp{};
+     auto c_element_op = CElementOp{};
+ 
+-
+     // do GEMM
+     auto device_gemm = DeviceGemmInstance{};
+     auto invoker = device_gemm.MakeInvoker();
+@@ -159,9 +149,9 @@ __forceinline__ torch::Tensor gemm_a4w4_blockscale_impl(
+                                              b_element_op,
+                                              c_element_op);
+ 
+-    TORCH_CHECK(device_gemm.IsSupportedArgument(argument), "This GEMM is not supported!");
++    AITER_CHECK(device_gemm.IsSupportedArgument(argument), "This GEMM is not supported!");
+ 
+-    invoker.Run(argument, StreamConfig{at::hip::getCurrentHIPStream()});
++    invoker.Run(argument, StreamConfig{stream});
+     return C;
+ }
+ 
+diff --git a/csrc/include/pybind_aiter_compat.h b/csrc/include/pybind_aiter_compat.h
+new file mode 100644
+index 000000000..4705ecef5
+--- /dev/null
++++ b/csrc/include/pybind_aiter_compat.h
+@@ -0,0 +1,44 @@
++#pragma once
++// SPDX-License-Identifier: MIT
++// Copyright (C) 2026, Advanced Micro Devices, Inc. All rights reserved.
++//
++// Utility for pybind wrappers: shallow-converts a torch::Tensor to the
++// aiter_tensor_t POD struct used by the torch-free kernel layer.  The caller
++// retains ownership of the underlying storage; aiter_tensor_t holds a raw
++// pointer and must not outlive the source tensor.
++#include "aiter_tensor.h"
++#include <torch/extension.h>
++
++namespace aiter_pybind {
++
++static inline aiter_tensor_t make_aiter_tensor(const torch::Tensor& t)
++{
++    TORCH_CHECK(t.is_cuda(), "aiter: tensor must be on a CUDA device");
++    TORCH_CHECK(t.dim() <= 8, "aiter: tensor rank exceeds aiter_tensor_t maximum of 8");
++    aiter_tensor_t at{};
++    at.ptr      = t.data_ptr();
++    at.numel_   = static_cast<size_t>(t.numel());
++    at.ndim     = t.dim();
++    for(int i = 0; i < t.dim(); ++i)
++    {
++        at.shape[i]   = t.size(i);
++        at.strides[i] = t.stride(i);
++    }
++    at.device_id = static_cast<int>(t.device().index());
++    switch(t.scalar_type())
++    {
++    case at::ScalarType::Float:    at.dtype_ = AITER_DTYPE_fp32;  break;
++    case at::ScalarType::Half:     at.dtype_ = AITER_DTYPE_fp16;  break;
++    case at::ScalarType::BFloat16: at.dtype_ = AITER_DTYPE_bf16;  break;
++    case at::ScalarType::Byte:     at.dtype_ = AITER_DTYPE_u8;    break;
++    case at::ScalarType::Char:     at.dtype_ = AITER_DTYPE_i8;    break;
++    default:
++        // fp4x2 / fp8 variants have no at::ScalarType; callers pass opaque
++        // uint8-typed buffers whose semantic dtype is implicit in the op.
++        at.dtype_ = AITER_DTYPE_fp4x2;
++        break;
++    }
++    return at;
++}
++
++} // namespace aiter_pybind
+diff --git a/csrc/pybind/gemm_a4w4_blockscale_pybind.cu b/csrc/pybind/gemm_a4w4_blockscale_pybind.cu
+index b2094ae25..76f1fb34c 100755
+--- a/csrc/pybind/gemm_a4w4_blockscale_pybind.cu
++++ b/csrc/pybind/gemm_a4w4_blockscale_pybind.cu
+@@ -1,7 +1,45 @@
+ // SPDX-License-Identifier: MIT
+ // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
++//
++// Sole torch-aware entry point for a4w4 blockscale GEMM.  All kernel code
++// (gemm_a4w4_blockscale.cu and the generated instances) is torch-free and
++// uses aiter_tensor_t.  This wrapper converts torch::Tensor to aiter_tensor_t,
++// extracts the current HIP stream from ATen, and delegates to aiter::.
+ #include "rocm_ops.hpp"
+ #include "gemm_a4w4_blockscale.h"
++#include "pybind_aiter_compat.h"
++
++#include <ATen/hip/HIPContext.h>
++
++namespace {
++
++torch::Tensor gemm_a4w4_blockscale(torch::Tensor& XQ,
++                                    torch::Tensor& WQ,
++                                    torch::Tensor& x_scale,
++                                    torch::Tensor& w_scale,
++                                    torch::Tensor& Y,
++                                    int splitK,
++                                    std::string kernelName)
++{
++    TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
++    TORCH_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
++    TORCH_CHECK(Y.scalar_type() == at::ScalarType::Half ||
++                Y.scalar_type() == at::ScalarType::BFloat16,
++                "Unsupported output dtype!");
++
++    auto xq_at = aiter_pybind::make_aiter_tensor(XQ);
++    auto wq_at = aiter_pybind::make_aiter_tensor(WQ);
++    auto xs_at = aiter_pybind::make_aiter_tensor(x_scale);
++    auto ws_at = aiter_pybind::make_aiter_tensor(w_scale);
++    auto y_at  = aiter_pybind::make_aiter_tensor(Y);
++
++    aiter::gemm_a4w4_blockscale(
++        xq_at, wq_at, xs_at, ws_at, y_at, splitK,
++        at::hip::getCurrentHIPStream(), kernelName);
++    return Y;
++}
++
++} // namespace
+ 
+ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
+ {
+diff --git a/csrc/pybind/gemm_a4w4_blockscale_tune_pybind.cu b/csrc/pybind/gemm_a4w4_blockscale_tune_pybind.cu
+index f7ad4f25c..433cbcdcd 100644
+--- a/csrc/pybind/gemm_a4w4_blockscale_tune_pybind.cu
++++ b/csrc/pybind/gemm_a4w4_blockscale_tune_pybind.cu
+@@ -1,7 +1,43 @@
+ // SPDX-License-Identifier: MIT
+ // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
++//
++// Sole torch-aware entry point for a4w4 blockscale GEMM tuning.
++// See gemm_a4w4_blockscale_pybind.cu for the rationale.
+ #include "rocm_ops.hpp"
+ #include "gemm_a4w4_blockscale.h"
++#include "pybind_aiter_compat.h"
++
++#include <ATen/hip/HIPContext.h>
++
++namespace {
++
++torch::Tensor gemm_a4w4_blockscale_tune(torch::Tensor& XQ,
++                                         torch::Tensor& WQ,
++                                         torch::Tensor& x_scale,
++                                         torch::Tensor& w_scale,
++                                         torch::Tensor& Y,
++                                         int kernelId,
++                                         int splitK)
++{
++    TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
++    TORCH_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
++    TORCH_CHECK(Y.scalar_type() == at::ScalarType::Half ||
++                Y.scalar_type() == at::ScalarType::BFloat16,
++                "Unsupported output dtype!");
++
++    auto xq_at = aiter_pybind::make_aiter_tensor(XQ);
++    auto wq_at = aiter_pybind::make_aiter_tensor(WQ);
++    auto xs_at = aiter_pybind::make_aiter_tensor(x_scale);
++    auto ws_at = aiter_pybind::make_aiter_tensor(w_scale);
++    auto y_at  = aiter_pybind::make_aiter_tensor(Y);
++
++    aiter::gemm_a4w4_blockscale_tune(
++        xq_at, wq_at, xs_at, ws_at, y_at, kernelId, splitK,
++        at::hip::getCurrentHIPStream());
++    return Y;
++}
++
++} // namespace
+ 
+ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
+ {
+diff --git a/op_tests/cpp/gemm_a4w4/compile.py b/op_tests/cpp/gemm_a4w4/compile.py
+new file mode 100644
+index 000000000..e1c605ce4
+--- /dev/null
++++ b/op_tests/cpp/gemm_a4w4/compile.py
+@@ -0,0 +1,17 @@
++# SPDX-License-Identifier: MIT
++# Copyright (C) 2026, Advanced Micro Devices, Inc. All rights reserved.
++import sys
++import os
++
++# !!!!!!!!!!!!!!!! never import aiter
++this_dir = os.path.dirname(os.path.abspath(__file__))
++sys.path.insert(0, f"{this_dir}/../../../aiter/")
++from jit.core import compile_ops, AITER_CSRC_DIR, AITER_CONFIGS  # noqa: E402
++
++
++@compile_ops("libgemm_a4w4_blockscale", fc_name="compile_gemm_a4w4_blockscale")
++def compile_gemm_a4w4_blockscale() -> None: ...
++
++
++if __name__ == "__main__":
++    compile_gemm_a4w4_blockscale()
