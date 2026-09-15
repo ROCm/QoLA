@@ -65,16 +65,16 @@ index 687a282..71464cf 100644
      CK_TILE_DEVICE void operator()(Kargs kargs) const
      {
          if constexpr(kIsAvailable)
-@@ -1530,7 +1545,8 @@ struct FmhaFwdKernel
-             long_index_t batch_offset_v_descale = 0;
-             const float sink_value =
-                 kargs.sink_ptr != nullptr
--                    ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
-+                    ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) /
-+                          GetSoftmaxScale(kargs)
-                     : -numeric<float>::infinity();
- 
-             if constexpr(kIsGroupMode)
+@@ -1541,7 +1556,8 @@ struct FmhaFwdKernel
+             else
+             {
+                 sink_value =
+                     kargs.sink_ptr != nullptr
+-                        ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
++                        ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) /
++                              GetSoftmaxScale(kargs)
+                         : -numeric<float>::infinity();
+             }
 @@ -1994,19 +2010,7 @@ struct FmhaFwdKernel
  
              AttentionVariant variant;
