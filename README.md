@@ -59,6 +59,7 @@ qola build \
 | `--arch` | Target GPU architecture (repeatable, e.g. `--arch gfx950`) |
 | `--mode` | Build mode: `pybind` (default) or `cpp_itfs` |
 | `--skip-checkout` | Build against whatever is currently at `--aiter-root` instead of running the checkout + patch step. `--aiter-commit` and `--patches-dir` are ignored when set. See *Skipping the checkout step* below |
+| `--group` | Build only the `[[modules]]` entries whose `group` matches (repeatable, accepts a `;`-separated list). Ungrouped modules are excluded while filtering is active. Falls back to `$QOLA_BUILD_GROUPS` |
 | `--verbose` | Enable verbose build output |
 
 #### Skipping the checkout step
@@ -108,6 +109,29 @@ Prints `AITER ready at <abs-path>` on success. Hard-fails on patch conflict — 
 | `--aiter-root` | Path to the AITER source tree (default: `<QoLA repo>/build/third_party/aiter`, cloned on demand) |
 | `--aiter-commit` | AITER SHA / tag / branch to fetch and checkout (overrides manifest) |
 | `--patches-dir` | Directory of `*.patch` files (overrides manifest; defaults to `<QoLA repo>/patches/aiter`; point at an empty dir to skip patching) |
+| `--group` | Validate that the manifest declares these module group(s) and report which modules they cover (repeatable, `;`-separated). Requires `--manifest`. See *Checking out per group* below |
+
+#### Checking out per group
+
+Checkout and build are independent commands, so a consumer can prepare AITER when it needs the sources and defer each group's build to whenever it is ready:
+
+```bash
+# Phase 1 — check out once, naming the group(s) this consumer owns.
+qola checkout --manifest manifest.toml --group aiter_gemm
+
+# Phase 2 — build that group later, against the tree from phase 1.
+qola build --manifest manifest.toml --output-dir out --group aiter_gemm --skip-checkout
+```
+
+A manifest pins one AITER commit and one patch set, so **every group in it shares a single checkout** — `--group` on `checkout` does not change what lands on disk. It exists so a per-group checkout fails fast on a bad group name (and prints the modules covered) rather than surfacing the mistake at build time:
+
+```console
+$ qola checkout --manifest manifest.toml --group aiter_gem
+ValueError: Unknown module group(s) ['aiter_gem'] for manifest manifest.toml.
+Declared groups: ['aiter_gemm', 'ck_fused_attn'].
+```
+
+Several groups can therefore be built from one checkout — run `qola checkout` once, then one `qola build --group … --skip-checkout` per group.
 
 The same logic is exposed for programmatic use:
 
@@ -116,9 +140,51 @@ from qola.build_tools import checkout_aiter
 
 aiter_root = checkout_aiter(manifest_path="example/te-manifest.toml")
 # aiter_root is now an absolute path to a clean, patched AITER checkout
+
+# Optional group validation, same semantics as --group
+aiter_root = checkout_aiter(manifest_path="manifest.toml", groups=["aiter_gemm"])
 ```
 
 `qola build` itself routes through `checkout_aiter`, so the two commands are guaranteed to produce identical AITER trees from identical inputs.
+
+### CMake integration
+
+`cmake/QoLA.cmake` wraps both commands for C++ consumers. It exposes the two phases separately, plus a wrapper that runs both:
+
+| Function | Phase |
+|---|---|
+| `qola_checkout_aiter()` | Checkout only — syncs the AITER tree named by a manifest, returns its path via `OUT_DIR`. Accepts `GROUPS` for the same fail-fast validation as `qola checkout --group` |
+| `qola_build_modules()` | Build only — runs `qola build --skip-checkout` for one `GROUP` against a given `AITER_DIR`, and resolves the resulting headers / `.so`s. Hard-fails if `AITER_DIR` is missing or isn't an AITER tree |
+| `qola_add_modules()` | Both — checks out into `<BUILD_DIR>/third_party/aiter` (unless `AITER_DIR` is passed), then builds the group |
+
+Two-phase usage, for consumers that need AITER sources before the kernels are built, or that build several groups from one checkout:
+
+```cmake
+include(${QOLA_DIR}/cmake/QoLA.cmake)
+
+qola_checkout_aiter(
+  MANIFEST   ${CMAKE_CURRENT_LIST_DIR}/qola_manifest.toml
+  AITER_DIR  ${CMAKE_CURRENT_BINARY_DIR}/qola/third_party/aiter
+  GROUPS     aiter_gemm
+  OUT_DIR    QOLA_AITER_SOURCE_DIR)
+
+# ...anything that needs AITER headers at configure time...
+
+qola_build_modules(
+  GROUP      aiter_gemm
+  MANIFEST   ${CMAKE_CURRENT_LIST_DIR}/qola_manifest.toml
+  BUILD_DIR  ${CMAKE_CURRENT_BINARY_DIR}/qola
+  AITER_DIR  ${QOLA_AITER_SOURCE_DIR}
+  ARCHS      ${MY_ARCHS}
+  OUT_INCLUDE_DIR QOLA_GEMM_INCLUDE_DIR
+  OUT_LIB_DIR     QOLA_GEMM_LIB_DIR
+  OUT_LIBS        QOLA_GEMM_LIBS)
+```
+
+Environment overrides:
+
+- `QOLA_AITER_SOURCE_DIR` — build against an existing AITER tree and skip checkout entirely.
+- `QOLA_PREBUILT_DIR_<GROUP>` — skip both phases for that group and consume `<dir>/lib` + `<dir>/include`.
 
 ## Manifest Format
 
