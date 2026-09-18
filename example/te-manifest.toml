@@ -1,8 +1,8 @@
 [qola]
-# Highest origin/te_feature_branch ancestor of the previous pinned commit
-# (33f2e6af5).  QoLA-owned deltas live in patches/aiter/*.patch and are
-# reapplied on every build.
-aiter_commit = "d32b0cb62"
+# Tip of origin/zain/torch-free/a4w4-poc (previous pin: d32b0cb62).
+# QoLA-owned deltas live in patches/aiter/*.patch and are reapplied on
+# every build.
+aiter_commit = "8aa6101d4"
 namespace = "te"
 rocm_versions = ["7"]
 

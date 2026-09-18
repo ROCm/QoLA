@@ -49,7 +49,7 @@
 # so several groups can be built from a single checkout.
 #
 # Environment overrides honoured by this module:
-#   QOLA_AITER_SOURCE_DIR / NVTE_AITER_SOURCE_DIR
+#   QOLA_AITER_SOURCE_DIR
 #       Build against an existing AITER tree and skip checkout entirely.
 #   QOLA_PREBUILT_DIR_<GROUP>
 #       Skip the build and consume prebuilt <dir>/lib and <dir>/include.
@@ -168,7 +168,7 @@ function(qola_checkout_aiter)
 
   set(_aiter_dir "${QCA_DEFAULT_DIR}")
   set(_skip FALSE)
-  foreach(_env QOLA_AITER_SOURCE_DIR NVTE_AITER_SOURCE_DIR)
+  foreach(_env QOLA_AITER_SOURCE_DIR)
     if(DEFINED ENV{${_env}} AND NOT "$ENV{${_env}}" STREQUAL "")
       set(_aiter_dir "$ENV{${_env}}")
       set(_skip TRUE)

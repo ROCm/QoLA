@@ -183,7 +183,7 @@ qola_build_modules(
 
 Environment overrides:
 
-- `QOLA_AITER_SOURCE_DIR` / `NVTE_AITER_SOURCE_DIR` — build against an existing AITER tree and skip checkout entirely.
+- `QOLA_AITER_SOURCE_DIR` — build against an existing AITER tree and skip checkout entirely.
 - `QOLA_PREBUILT_DIR_<GROUP>` — skip both phases for that group and consume `<dir>/lib` + `<dir>/include`.
 
 ## Manifest Format

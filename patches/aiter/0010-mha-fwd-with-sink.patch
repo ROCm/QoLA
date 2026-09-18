@@ -1,14 +1,8 @@
-diff --git a/3rdparty/composable_kernel b/3rdparty/composable_kernel
---- a/3rdparty/composable_kernel
-+++ b/3rdparty/composable_kernel
-@@ -1 +1 @@
--Subproject commit f33252cebe5a52362ec1ee12c124dde7800dda3a
-+Subproject commit f33252cebe5a52362ec1ee12c124dde7800dda3a-dirty
 diff --git a/aiter/jit/optCompilerConfig.json b/aiter/jit/optCompilerConfig.json
-index dfd8a964a..fd3a0d02c 100644
+index 3240d350b..1365a45ec 100644
 --- a/aiter/jit/optCompilerConfig.json
 +++ b/aiter/jit/optCompilerConfig.json
-@@ -1524,7 +1524,8 @@
+@@ -1661,7 +1661,8 @@
              "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd_batch_prefill.cu'",
              "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu'",
              "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu'",
@@ -18,7 +12,7 @@ index dfd8a964a..fd3a0d02c 100644
          ],
          "flags_extra_cc": [],
          "flags_extra_hip": [
-@@ -1549,7 +1550,8 @@
+@@ -1686,7 +1687,8 @@
          "blob_gen_cmd": [
              "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --output_dir {{}}'",
              "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --output_dir {{}}'",
@@ -29,7 +23,7 @@ index dfd8a964a..fd3a0d02c 100644
      },
      "libmha_bwd": {
 diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
-index 49b762d9a..a7a46bcdd 100644
+index be8799942..a037be339 100644
 --- a/csrc/cpp_itfs/mha_fwd.cu
 +++ b/csrc/cpp_itfs/mha_fwd.cu
 @@ -6,6 +6,34 @@

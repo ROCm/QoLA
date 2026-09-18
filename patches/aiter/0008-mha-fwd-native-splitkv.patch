@@ -1,8 +1,8 @@
 diff --git a/aiter/jit/optCompilerConfig.json b/aiter/jit/optCompilerConfig.json
-index adbf3d29a..dfd8a964a 100644
+index 035ac44b0d..3240d350bc 100644
 --- a/aiter/jit/optCompilerConfig.json
 +++ b/aiter/jit/optCompilerConfig.json
-@@ -1521,7 +1521,10 @@
+@@ -1658,7 +1658,10 @@
          "srcs": [
              "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd.cu'",
              "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd_split.cu'",
@@ -14,7 +14,7 @@ index adbf3d29a..dfd8a964a 100644
          ],
          "flags_extra_cc": [],
          "flags_extra_hip": [
-@@ -1529,8 +1532,14 @@
+@@ -1666,8 +1669,14 @@
              "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'",
              "'-DCK_TILE_FMHA_FWD_SPLITKV_API=1'"
          ],
@@ -30,7 +30,7 @@ index adbf3d29a..dfd8a964a 100644
          ],
          "verbose": "False",
 diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
-index 5ef75f4b7..49b762d9a 100644
+index 239208c231..be8799942d 100644
 --- a/csrc/cpp_itfs/mha_fwd.cu
 +++ b/csrc/cpp_itfs/mha_fwd.cu
 @@ -3,6 +3,9 @@
@@ -254,7 +254,7 @@ index 5ef75f4b7..49b762d9a 100644
      ret = fmha_fwd_v3(args, s);
  #endif
 diff --git a/csrc/include/mha_fwd.h b/csrc/include/mha_fwd.h
-index d191ab652..0f33dd6e0 100644
+index d191ab652d..0f33dd6e00 100644
 --- a/csrc/include/mha_fwd.h
 +++ b/csrc/include/mha_fwd.h
 @@ -243,6 +243,12 @@ struct mha_fwd_args
@@ -290,7 +290,7 @@ index d191ab652..0f33dd6e0 100644
  float fmha_fwd_v3(mha_fwd_args a, const ck_tile::stream_config& s);
  } // namespace aiter
 diff --git a/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu b/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu
-index 9c207bbf6..8faaa9ef6 100644
+index 9c207bbf60..8faaa9ef6c 100644
 --- a/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu
 +++ b/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu
 @@ -5,6 +5,7 @@
@@ -310,7 +310,7 @@ index 9c207bbf6..8faaa9ef6 100644
  
  void launch_msk0_split(const FmhaFwdSplitParams& sp, dim3 grid, hipStream_t stream) {
 diff --git a/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu b/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu
-index ee77f9c4c..eeb1f1eb0 100644
+index ee77f9c4c5..eeb1f1eb08 100644
 --- a/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu
 +++ b/csrc/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu
 @@ -5,6 +5,7 @@
@@ -330,7 +330,7 @@ index ee77f9c4c..eeb1f1eb0 100644
  
  void launch_msk1_split(const FmhaFwdSplitParams& sp, dim3 grid, hipStream_t stream) {
 diff --git a/csrc/kernels/mha_native/fused/op_combine.hpp b/csrc/kernels/mha_native/fused/op_combine.hpp
-index c3ff3fd1d..9454030eb 100644
+index c3ff3fd1d5..9454030eb5 100644
 --- a/csrc/kernels/mha_native/fused/op_combine.hpp
 +++ b/csrc/kernels/mha_native/fused/op_combine.hpp
 @@ -89,7 +89,7 @@ __device__ __forceinline__ void combine_split(
@@ -352,7 +352,7 @@ index c3ff3fd1d..9454030eb 100644
      if (G == 1) {
          const float* o0 = p.scratch_o + bh_row * kD;   // plane 0, this (b,h,R)
 diff --git a/csrc/kernels/mha_native/fused/pipeline.hpp b/csrc/kernels/mha_native/fused/pipeline.hpp
-index 72cf2dec1..233fdc8e2 100644
+index 72cf2dec1f..e4f865503e 100644
 --- a/csrc/kernels/mha_native/fused/pipeline.hpp
 +++ b/csrc/kernels/mha_native/fused/pipeline.hpp
 @@ -1,5 +1,8 @@

@@ -1,36 +1,10 @@
 Subject: CK: FMHA attention-sink fixes
 
-Three fixes on the sink path. TransformerEngine reaches all of them through
-softmax_offset (softmax_type != "vanilla"), which sets has_sink with
-sink_size = 0.
-
-fmha_bwd_kernel.hpp: sink_ptr was indexed as a [batch, nhead] buffer. It holds
-one value per head, as the fwd kernels already assume. Corrupted
-d_softmax_offset and the q/k/v gradients for every batch index > 0.
-
-block_fmha_pipeline_qr_ks_vs.hpp, block_fmha_pipeline_qr_ks_vs_async.hpp: the
-bias, randval and K/V windows are built at kv_load_start, which already equals
-seqlen_k_start when no sink prefix exists, but each kHasSink block moved them a
-second time by (seqlen_k_start - sink_seq_end) on iteration 0. Guarding on an
-actual sink phase makes the move inert when num_sink_loop == 0. This broke sink
-combined with a local (sliding-window) mask: in QRKSVS the K/V check is live, so
-forward output was garbage (rel. err ~1.0) for bias + SWA + sink. The bias and
-randval windows are wrong in both pipelines.
-
-fmha_fwd_kernel.hpp: the sink logit was divided by kargs.scale_s while the
-softmax variant uses scale_s * q_descale * k_descale under PERTENSOR, so the
-round trip left the logit scaled by q_descale * k_descale. Both now go through
-GetSoftmaxScale(). Affects fp8 per-tensor quantization only; with NO_SCALE the
-helper returns kargs.scale_s and the generated code is unchanged.
-
-Source: rocm-libraries branch knasyrov/mha_sink_fix, commits 4727153c27 and
-5c5ba106fd, plus the bwd index fix.
-
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
-index 7aff215..5992fbe 100644
+index c666fc05f..6dfbc89c3 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_bwd_kernel.hpp
-@@ -1828,7 +1828,7 @@ struct FmhaBwdOGradDotOKernel
+@@ -2310,7 +2310,7 @@ struct FmhaBwdOGradDotOKernel
          const LSEDataType sink_value =
              kargs.sink_ptr != nullptr
                  ? log2e_v<LSEDataType> *
@@ -40,7 +14,7 @@ index 7aff215..5992fbe 100644
  
          // for simplicity, batch stride we just modify the pointer
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp
-index 687a282..71464cf 100644
+index 2d0df7d3e..70f881964 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp
 @@ -1501,6 +1501,21 @@ struct FmhaFwdKernel
@@ -65,8 +39,7 @@ index 687a282..71464cf 100644
      CK_TILE_DEVICE void operator()(Kargs kargs) const
      {
          if constexpr(kIsAvailable)
-@@ -1541,7 +1556,8 @@ struct FmhaFwdKernel
-             else
+@@ -1542,7 +1557,8 @@ struct FmhaFwdKernel
              {
                  sink_value =
                      kargs.sink_ptr != nullptr
@@ -75,7 +48,8 @@ index 687a282..71464cf 100644
 +                              GetSoftmaxScale(kargs)
                          : -numeric<float>::infinity();
              }
-@@ -1994,19 +2010,7 @@ struct FmhaFwdKernel
+ 
+@@ -2007,19 +2023,7 @@ struct FmhaFwdKernel
  
              AttentionVariant variant;
              const auto variant_params = [&] {
@@ -96,7 +70,7 @@ index 687a282..71464cf 100644
  
                  if constexpr(kHasLogitsSoftCap)
                  {
-@@ -2340,7 +2344,8 @@ struct FmhaFwdKernel
+@@ -2354,7 +2358,8 @@ struct FmhaFwdKernel
              const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
              const float sink_value =
                  kargs.sink_ptr != nullptr
@@ -107,10 +81,10 @@ index 687a282..71464cf 100644
  
              const index_t i_m0 = i_tile_m * FmhaPipeline::kM0;
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp
-index 9b93246..61beff3 100644
+index 09b73c03d..9e972d89e 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp
-@@ -774,7 +774,7 @@ struct BlockFmhaPipelineQRKSVS
+@@ -776,7 +776,7 @@ struct BlockFmhaPipelineQRKSVS
              }
              if constexpr(kHasSink)
              {
@@ -119,7 +93,7 @@ index 9b93246..61beff3 100644
                      move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
              }
              move_tile_window(bias_dram_window, {0, kN0});
-@@ -946,7 +946,7 @@ struct BlockFmhaPipelineQRKSVS
+@@ -1015,7 +1015,7 @@ struct BlockFmhaPipelineQRKSVS
                          return seqlen_k_start + i_total_loops * kN0;
  
                      const bool in_sink_phase = (num_sink_loop > i_total_loops);
@@ -128,7 +102,7 @@ index 9b93246..61beff3 100644
                          move_tile_window(randval_dram_window, {0, seqlen_k_start - sink_seq_end});
  
                      return in_sink_phase ? (kv_load_start + i_total_loops * kN0)
-@@ -1119,7 +1119,7 @@ struct BlockFmhaPipelineQRKSVS
+@@ -1188,7 +1188,7 @@ struct BlockFmhaPipelineQRKSVS
              // move K tile windows
              if constexpr(kHasSink)
              {
@@ -138,10 +112,10 @@ index 9b93246..61beff3 100644
                      move_tile_window(k_dram_block_window, {seqlen_k_start - sink_seq_end, 0});
                      move_tile_window(v_dram_window, {0, seqlen_k_start - sink_seq_end});
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp
-index 7b97d01..3ce8cb2 100644
+index b621e9cea..826bf64fc 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp
-@@ -536,7 +536,7 @@ struct BlockFmhaPipelineQRKSVSAsync
+@@ -655,7 +655,7 @@ struct BlockFmhaPipelineQRKSVSAsync
              }
              if constexpr(kHasSink)
              {
@@ -150,7 +124,7 @@ index 7b97d01..3ce8cb2 100644
                      move_tile_window(bias_dram_window, {0, seqlen_k_start - sink_seq_end});
              }
              move_tile_window(bias_dram_window, {0, kN0});
-@@ -751,7 +751,7 @@ struct BlockFmhaPipelineQRKSVSAsync
+@@ -927,7 +927,7 @@ struct BlockFmhaPipelineQRKSVSAsync
                          return seqlen_k_start + i_total_loops * kN0;
  
                      const bool in_sink_phase = (num_sink_loop > i_total_loops);
