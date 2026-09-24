@@ -1,24 +1,10 @@
 Subject: HSA-only path in aiter_hip_common.h (require + use embedded blobs)
 
-QoLA always builds AITER with -DAITER_EMBEDDED_HSA_HEADER and embeds the
-.co blobs directly into the binary. Two changes:
-
-1. Wrap the entire AiterAsmKernel class in #ifdef AITER_EMBEDDED_HSA_HEADER
-   so type-only consumers (TE's ck_fused_attn includes this header solely
-   for aiter::mha_fwd_args and friends, with no -D for the embedded macros)
-   can compile against this header without supplying the embedded blobs.
-
-2. Strip the AITER_ASM_DIR runtime fallback from
-   AiterAsmKernel::load_hsaco_file so a stray env var cannot make a
-   QoLA-built consumer silently load .co files from disk; refuse to
-   compile if AITER_EMBEDDED_HSA_MAP is missing alongside the header
-   macro.
-
 diff --git a/csrc/include/aiter_hip_common.h b/csrc/include/aiter_hip_common.h
-index e4c9641af..697364606 100644
+index d1186493f..f8c3da3d9 100644
 --- a/csrc/include/aiter_hip_common.h
 +++ b/csrc/include/aiter_hip_common.h
-@@ -290,6 +290,13 @@ class AiterAsmKernelFast
+@@ -385,6 +385,13 @@ class AiterAsmKernelFast
      };
  };
  
@@ -32,7 +18,7 @@ index e4c9641af..697364606 100644
  class AiterAsmKernel : private AiterAsmKernelFast
  {
      private:
-@@ -380,44 +387,23 @@ class AiterAsmKernel : private AiterAsmKernelFast
+@@ -475,44 +482,23 @@ class AiterAsmKernel : private AiterAsmKernelFast
          }
      }
  
@@ -91,7 +77,7 @@ index e4c9641af..697364606 100644
      }
  
      public:
-@@ -428,6 +414,7 @@ class AiterAsmKernel : private AiterAsmKernelFast
+@@ -531,6 +517,7 @@ class AiterAsmKernel : private AiterAsmKernelFast
  
      using AiterAsmKernelFast::launch_kernel;
  };

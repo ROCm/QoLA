@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 try:
     import tomllib
@@ -47,6 +47,7 @@ def checkout_aiter(
     aiter_root: Optional[str] = None,
     aiter_commit: Optional[str] = None,
     patches_dir: Optional[str] = None,
+    groups: Optional[List[str]] = None,
 ) -> str:
     """Resolve the AITER checkout + patch step from manifest/CLI inputs.
 
@@ -60,6 +61,14 @@ def checkout_aiter(
     - ``patches_dir``: argument > manifest's ``[qola] patches_dir`` >
       ``default_patches_dir()``
 
+    *groups* does **not** change the resulting tree — a manifest pins one
+    commit and one patch set, so every group in it shares a single
+    checkout.  It is a fail-fast validation hook for consumers that check
+    out per group and defer the matching ``qola build --group`` to a later
+    phase: an unknown or empty group raises here, before the expensive
+    checkout, instead of surfacing at build time.  Requires
+    *manifest_path*.
+
     Returns the absolute path to the prepared AITER root.
 
     Raises
@@ -67,6 +76,9 @@ def checkout_aiter(
     RuntimeError
         If the checkout does not exist and no commit was specified
         anywhere, or if a patch fails to apply.
+    ValueError
+        If *groups* is given without a manifest, or names a group the
+        manifest does not declare.
     """
     if aiter_root is None:
         aiter_root = default_aiter_root()
@@ -76,6 +88,23 @@ def checkout_aiter(
     if manifest_path is not None:
         with open(manifest_path, "rb") as f:
             qola_section = tomllib.load(f).get("qola", {})
+    elif groups:
+        raise ValueError(
+            "checkout groups were requested but no manifest was provided; "
+            "group names are only meaningful relative to a manifest's "
+            "[[modules]] table."
+        )
+
+    if groups:
+        # Import locally: config.py pulls in the resolver, and checkout
+        # must stay usable without an AITER tree present.
+        from .config import select_module_names
+
+        covered = select_module_names(manifest_path, groups)
+        print(
+            f"[QoLA] Checkout for group(s) {sorted(set(groups))} "
+            f"covering module(s) {covered}"
+        )
 
     effective_commit = aiter_commit or qola_section.get("aiter_commit")
     effective_patches_dir = (

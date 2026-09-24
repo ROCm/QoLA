@@ -1,3 +1,126 @@
+diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
+index 84e2d65c8..fcec2bf39 100644
+--- a/csrc/cpp_itfs/mha_bwd.cu
++++ b/csrc/cpp_itfs/mha_bwd.cu
+@@ -253,12 +253,6 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+         return -1;
+     }
+ 
+-    if(a.is_group_mode && !a.pinned_host_alloc)
+-    {
+-        AITER_LOG_ERROR("mha_bwd: group mode requires pinned_host_alloc callback");
+-        return -1;
+-    }
+-
+     const fmha_bwd_traits traits{
+         a.seqlen_q,
+         a.seqlen_k,
+@@ -282,15 +276,13 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+     fmha_bwd_launcher launcher(traits);
+     void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/false);
+ 
+-    // Single call enqueues the full async workspace pipeline on the caller's
+-    // stream: dq_acc zero (if needed), D2H seqstart (group mode), pack on host,
+-    // H2D ws metadata. The pinned staging buffer is owned by `launcher` and
+-    // released by its destructor via a tail hipLaunchHostFunc on the stream.
++    // Enqueues the workspace prep on the caller's stream: dq_acc zero (if needed)
++    // plus an on-device kernel that writes the nsplits[]/offsets[] metadata. Fully
++    // stream-capturable — no host callback or pinned host staging.
+     launcher.prepare_workspace_async(workspace_ptr,
+                                      static_cast<const int*>(a.seqstart_q_ptr),
+                                      static_cast<const int*>(a.seqstart_k_ptr),
+-                                     s,
+-                                     a.pinned_host_alloc);
++                                     s);
+ 
+     fmha_bwd_args ck_args{
+         /* q_ptr              */ a.q_ptr,
+diff --git a/csrc/include/mha_bwd.h b/csrc/include/mha_bwd.h
+index cf38addd3..618698272 100644
+--- a/csrc/include/mha_bwd.h
++++ b/csrc/include/mha_bwd.h
+@@ -148,17 +148,6 @@ struct mha_bwd_args
+     // until aiter::mha_bwd returns. If zero_init is true the bytes must be zero
+     // by the time the kernel reads them.
+     std::function<void*(size_t bytes, bool zero_init)> workspace_alloc{};
+-
+-    // Per-call pinned (page-locked) host buffer allocator. Returned shared_ptr
+-    // owns the underlying host allocation and is type-erased so the caller can
+-    // back it with PyTorch's CachingHostAllocator (pin_memory=true), raw
+-    // hipHostMalloc/hipHostFree, or a custom pool. The pointer accessed via
+-    // .get() must remain valid (not reused by the allocator) for as long as any
+-    // pending stream operation references it; aiter ensures this by extending
+-    // shared_ptr lifetime via a stream-tail hipLaunchHostFunc keepalive.
+-    // Required for the group-mode async pipeline; mha_bwd returns an error if
+-    // left empty in group mode. Unused in batch mode (may be left empty).
+-    std::function<std::shared_ptr<void>(size_t bytes)> pinned_host_alloc{};
+ };
+ 
+ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
+diff --git a/csrc/py_itfs_ck/mha_bwd_kernels.cu b/csrc/py_itfs_ck/mha_bwd_kernels.cu
+index 44adcbc04..69ce6b85c 100644
+--- a/csrc/py_itfs_ck/mha_bwd_kernels.cu
++++ b/csrc/py_itfs_ck/mha_bwd_kernels.cu
+@@ -147,17 +147,6 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d_v]
+         return workspace.data_ptr();
+     };
+ 
+-    // Pinned host buffer allocator backed by PyTorch's CachingHostAllocator.
+-    // Provided so dispatcher's async pipeline path is available even in batch
+-    // mode (where the dispatcher itself currently bypasses D2H, but keeps the
+-    // ABI uniform across batch/group entry points).
+-    auto pinned_host_alloc = [](size_t bytes) -> std::shared_ptr<void> {
+-        auto t = std::make_shared<at::Tensor>(torch::empty(
+-            {static_cast<int64_t>(bytes)},
+-            torch::TensorOptions().dtype(at::kByte).pinned_memory(true)));
+-        return std::shared_ptr<void>(t, t->data_ptr());
+-    };
+-
+     at::Tensor dk_expanded, dv_expanded;
+     if (num_heads_k != num_heads) {  // MQA / GQA
+         dk_expanded = torch::empty({batch_size, seqlen_k, num_heads, head_size_q}, opts);
+@@ -399,8 +388,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d_v]
+                                 p_dropout,
+                                 p_undrop,
+                                 drop_seed_offset,
+-                                workspace_alloc,
+-                                pinned_host_alloc};
++                                workspace_alloc};
+         }();
+ 
+         float t = aiter::mha_bwd(args, stream_config);
+diff --git a/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu b/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu
+index 20d65e99f..419e131b6 100644
+--- a/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu
++++ b/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu
+@@ -164,17 +164,6 @@ mha_varlen_bwd(const at::Tensor &dout,         // [total_q, hq, d_v]
+         return workspace.data_ptr();
+     };
+ 
+-    // Pinned host buffer allocator backed by PyTorch's CachingHostAllocator.
+-    // The returned shared_ptr owns the at::Tensor; aiter holds it alive via a
+-    // stream-tail hipLaunchHostFunc keepalive so the buffer is not recycled
+-    // while async D2H/H2D copies are still in flight on the stream.
+-    auto pinned_host_alloc = [](size_t bytes) -> std::shared_ptr<void> {
+-        auto t = std::make_shared<at::Tensor>(torch::empty(
+-            {static_cast<int64_t>(bytes)},
+-            torch::TensorOptions().dtype(at::kByte).pinned_memory(true)));
+-        return std::shared_ptr<void>(t, t->data_ptr());
+-    };
+-
+     at::Tensor dk_expanded, dv_expanded;
+     if (num_heads_k != num_heads) {  // MQA / GQA
+         dk_expanded = torch::empty({total_k, num_heads, head_size_q}, opts);
+@@ -407,8 +396,7 @@ mha_varlen_bwd(const at::Tensor &dout,         // [total_q, hq, d_v]
+                                 p_dropout,
+                                 p_undrop,
+                                 drop_seed_offset,
+-                                workspace_alloc,
+-                                pinned_host_alloc};
++                                workspace_alloc};
+         }();
+ 
+         float t = aiter::mha_bwd(args, stream_config);
 diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
 index dae78e243..95bc49379 100644
 --- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_bwd.py
@@ -587,126 +710,3 @@ index 497cf8d7a..c666fc05f 100644
      using WorkspaceManager = FmhaBwdWorkspaceManager<AccDataType, kIsGroupMode, kIsDeterministic>;
  
      // clang-format off
-diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
-index 1010fca9f..c397cb2ea 100644
---- a/csrc/cpp_itfs/mha_bwd.cu
-+++ b/csrc/cpp_itfs/mha_bwd.cu
-@@ -251,12 +251,6 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
-         return -1;
-     }
- 
--    if(a.is_group_mode && !a.pinned_host_alloc)
--    {
--        AITER_LOG_ERROR("mha_bwd: group mode requires pinned_host_alloc callback");
--        return -1;
--    }
--
-     const fmha_bwd_traits traits{
-         a.seqlen_q,
-         a.seqlen_k,
-@@ -280,15 +274,13 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
-     fmha_bwd_launcher launcher(traits);
-     void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/false);
- 
--    // Single call enqueues the full async workspace pipeline on the caller's
--    // stream: dq_acc zero (if needed), D2H seqstart (group mode), pack on host,
--    // H2D ws metadata. The pinned staging buffer is owned by `launcher` and
--    // released by its destructor via a tail hipLaunchHostFunc on the stream.
-+    // Enqueues the workspace prep on the caller's stream: dq_acc zero (if needed)
-+    // plus an on-device kernel that writes the nsplits[]/offsets[] metadata. Fully
-+    // stream-capturable — no host callback or pinned host staging.
-     launcher.prepare_workspace_async(workspace_ptr,
-                                      static_cast<const int*>(a.seqstart_q_ptr),
-                                      static_cast<const int*>(a.seqstart_k_ptr),
--                                     s,
--                                     a.pinned_host_alloc);
-+                                     s);
- 
-     fmha_bwd_args ck_args{
-         /* q_ptr              */ a.q_ptr,
-diff --git a/csrc/include/mha_bwd.h b/csrc/include/mha_bwd.h
-index cf38addd3..618698272 100644
---- a/csrc/include/mha_bwd.h
-+++ b/csrc/include/mha_bwd.h
-@@ -148,17 +148,6 @@ struct mha_bwd_args
-     // until aiter::mha_bwd returns. If zero_init is true the bytes must be zero
-     // by the time the kernel reads them.
-     std::function<void*(size_t bytes, bool zero_init)> workspace_alloc{};
--
--    // Per-call pinned (page-locked) host buffer allocator. Returned shared_ptr
--    // owns the underlying host allocation and is type-erased so the caller can
--    // back it with PyTorch's CachingHostAllocator (pin_memory=true), raw
--    // hipHostMalloc/hipHostFree, or a custom pool. The pointer accessed via
--    // .get() must remain valid (not reused by the allocator) for as long as any
--    // pending stream operation references it; aiter ensures this by extending
--    // shared_ptr lifetime via a stream-tail hipLaunchHostFunc keepalive.
--    // Required for the group-mode async pipeline; mha_bwd returns an error if
--    // left empty in group mode. Unused in batch mode (may be left empty).
--    std::function<std::shared_ptr<void>(size_t bytes)> pinned_host_alloc{};
- };
- 
- struct __attribute__((packed)) fmha_bwd_dqdkdv_args
-diff --git a/csrc/py_itfs_ck/mha_bwd_kernels.cu b/csrc/py_itfs_ck/mha_bwd_kernels.cu
-index 44adcbc04..69ce6b85c 100644
---- a/csrc/py_itfs_ck/mha_bwd_kernels.cu
-+++ b/csrc/py_itfs_ck/mha_bwd_kernels.cu
-@@ -147,17 +147,6 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d_v]
-         return workspace.data_ptr();
-     };
- 
--    // Pinned host buffer allocator backed by PyTorch's CachingHostAllocator.
--    // Provided so dispatcher's async pipeline path is available even in batch
--    // mode (where the dispatcher itself currently bypasses D2H, but keeps the
--    // ABI uniform across batch/group entry points).
--    auto pinned_host_alloc = [](size_t bytes) -> std::shared_ptr<void> {
--        auto t = std::make_shared<at::Tensor>(torch::empty(
--            {static_cast<int64_t>(bytes)},
--            torch::TensorOptions().dtype(at::kByte).pinned_memory(true)));
--        return std::shared_ptr<void>(t, t->data_ptr());
--    };
--
-     at::Tensor dk_expanded, dv_expanded;
-     if (num_heads_k != num_heads) {  // MQA / GQA
-         dk_expanded = torch::empty({batch_size, seqlen_k, num_heads, head_size_q}, opts);
-@@ -399,8 +388,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d_v]
-                                 p_dropout,
-                                 p_undrop,
-                                 drop_seed_offset,
--                                workspace_alloc,
--                                pinned_host_alloc};
-+                                workspace_alloc};
-         }();
- 
-         float t = aiter::mha_bwd(args, stream_config);
-diff --git a/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu b/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu
-index 20d65e99f..419e131b6 100644
---- a/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu
-+++ b/csrc/py_itfs_ck/mha_varlen_bwd_kernels.cu
-@@ -164,17 +164,6 @@ mha_varlen_bwd(const at::Tensor &dout,         // [total_q, hq, d_v]
-         return workspace.data_ptr();
-     };
- 
--    // Pinned host buffer allocator backed by PyTorch's CachingHostAllocator.
--    // The returned shared_ptr owns the at::Tensor; aiter holds it alive via a
--    // stream-tail hipLaunchHostFunc keepalive so the buffer is not recycled
--    // while async D2H/H2D copies are still in flight on the stream.
--    auto pinned_host_alloc = [](size_t bytes) -> std::shared_ptr<void> {
--        auto t = std::make_shared<at::Tensor>(torch::empty(
--            {static_cast<int64_t>(bytes)},
--            torch::TensorOptions().dtype(at::kByte).pinned_memory(true)));
--        return std::shared_ptr<void>(t, t->data_ptr());
--    };
--
-     at::Tensor dk_expanded, dv_expanded;
-     if (num_heads_k != num_heads) {  // MQA / GQA
-         dk_expanded = torch::empty({total_k, num_heads, head_size_q}, opts);
-@@ -407,8 +396,7 @@ mha_varlen_bwd(const at::Tensor &dout,         // [total_q, hq, d_v]
-                                 p_dropout,
-                                 p_undrop,
-                                 drop_seed_offset,
--                                workspace_alloc,
--                                pinned_host_alloc};
-+                                workspace_alloc};
-         }();
- 
-         float t = aiter::mha_bwd(args, stream_config);
