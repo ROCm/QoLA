@@ -3,7 +3,8 @@
 Drop unified-diff `*.patch` files in this directory. On every build,
 `qola.build_tools.submodule.ensure_aiter_commit` re-checks out the
 manifest's pinned AITER commit, force-syncs submodules (CK lives at
-AITER's `3rdparty/composable_kernel/` as a submodule), then applies
+AITER's `3rdparty/composable_kernel/` as a submodule), removes untracked
+files (`git clean -fd`, ignored build output is kept), then applies
 each patch in lexicographic filename order via `git apply --3way`.
 
 A failing patch hard-aborts the build — there are no `--reject` files

@@ -102,7 +102,10 @@ def ensure_aiter_commit(
     2. ``git reset --hard`` to *commit* — wipes any local edits.
     3. ``git submodule update --init --recursive --force`` — resyncs CK
        and any other AITER submodules to the recorded commits.
-    4. Applies every ``*.patch`` file in *patches_dir* in lexicographic
+    4. ``git clean -fd`` in AITER and its submodules — removes untracked
+       files, such as those added by previously applied patches; ignored
+       build output is kept.
+    5. Applies every ``*.patch`` file in *patches_dir* in lexicographic
        order via ``git apply --3way``. The first failing patch aborts the
        build with a pointer at the offending file.
 
@@ -136,6 +139,10 @@ def ensure_aiter_commit(
         print(f"[QoLA] Checking out AITER {target} (was {head})")
     _git(aiter_root, "reset", "--hard", target)
     _git(aiter_root, "submodule", "update", "--init", "--recursive", "--force")
+    # Files added by previously applied patches survive reset --hard, and a patch that adds a file
+    # does not apply over an existing one. Remove untracked files; keep ignored ones (build output).
+    _git(aiter_root, "clean", "-fd")
+    _git(aiter_root, "submodule", "foreach", "--quiet", "--recursive", "git clean -fd")
 
     _apply_patches(aiter_root, patches_dir)
 
