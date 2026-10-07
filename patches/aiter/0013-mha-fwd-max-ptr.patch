@@ -1,12 +1,12 @@
 Subject: AITER: mha_fwd_args::max_ptr for the per-row max logit
 
-Forward an optional max_ptr (laid out like lse_ptr) to the CK forward, which
-writes the exact per-row max logit next to the LSE (needs CK patch 0012).
-The asm (v3 and sink) and native split-K paths cannot write it, so they are
-skipped when max_ptr is set.
+Forward an optional max_ptr (laid out like lse_ptr) to the CK forward, whose
+dispatch then picks the instances that write the exact per-row max logit next
+to the LSE (needs CK patch 0012). The asm paths are skipped when it is set,
+and the native split-K path rejects it.
 
 diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
-index a7a46bc..65d04ba 100644
+index a7a46bc..af8ea6a 100644
 --- a/csrc/cpp_itfs/mha_fwd.cu
 +++ b/csrc/cpp_itfs/mha_fwd.cu
 @@ -240,6 +240,8 @@ float fmha_fwd_v3(mha_fwd_args a, const ck_tile::stream_config& s)
@@ -43,20 +43,8 @@ index a7a46bc..65d04ba 100644
      if(a.is_group_mode) return false;  // varlen: not supported here
      if(a.hdim_q != 64 && a.hdim_q != 128) return false;
      if(a.hdim_v != a.hdim_q) return false;
-@@ -743,8 +749,9 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
- #if FA_WITH_NATIVE_SPLITKV
-     // Dispatch to the native split-K kernel when the caller has pre-validated the
-     // config via mha_fwd_calculate_num_splits() and provided a workspace buffer.
--    // No implicit fallback: if the caller set num_splits > 0 it expects this path.
--    if(args.num_splits > 0 && args.splitkv_workspace_ptr != nullptr)
-+    // No implicit fallback: if the caller set num_splits > 0 it expects this path, unless it also
-+    // asked for the max logit, which only the CK path writes.
-+    if(args.num_splits > 0 && args.splitkv_workspace_ptr != nullptr && args.max_ptr == nullptr)
-         return fmha_fwd_native_splitkv(args, s);
- #endif
- 
 diff --git a/csrc/include/mha_fwd.h b/csrc/include/mha_fwd.h
-index 09f1ef1..b09f776 100644
+index 09f1ef1..00f7d7b 100644
 --- a/csrc/include/mha_fwd.h
 +++ b/csrc/include/mha_fwd.h
 @@ -249,6 +249,11 @@ struct mha_fwd_args
@@ -64,9 +52,9 @@ index 09f1ef1..b09f776 100644
      int   num_splits            = 0;       // number of KV-axis splits (from mha_fwd_calculate_num_splits)
      void* splitkv_workspace_ptr = nullptr; // caller-owned device scratch buffer (see above)
 +
-+    // Optional fp32 per-row max logit, same layout and strides as lse_ptr. Needs has_lse; see CK
-+    // fmha_fwd_args::max_ptr for the instances that support it. Only the CK tile path writes it,
-+    // so the asm and native split-K paths are skipped when it is set.
++    // Optional fp32 per-row max logit, same layout and strides as lse_ptr (see CK
++    // fmha_fwd_args::max_ptr). Needs has_lse. Only the CK tile path writes it: the asm paths are
++    // skipped and the native split-K path rejects it.
 +    void* max_ptr = nullptr;
  };
  

@@ -2,24 +2,159 @@ Subject: CK: store the exact per-row max logit next to the FMHA forward LSE
 
 Add fmha_fwd_args::max_ptr (fp32, same layout and strides as lse_ptr) for
 the max logit used by QK-clip / MuonClip: the max of the softmax inputs over
-the unmasked keys, -inf for fully masked rows.
+the unmasked keys, excluding the sink, -inf for fully masked rows.
 
-The qr, qr_async and qr_async_trload forward pipelines keep an exact running
-row max (kStoreRowMax), updated before the conditional rescale that can leave
-m up to 8 log2 units below it, and store it next to the LSE in the same
-units. The store is gated at runtime on max_ptr, so no kernel instances are
-added. Only instances that store the LSE and have no bias, dropout or sink
-carry it: in the others the extra live tile costs occupancy or spills (up to
-14% on the d64 group-mode sink kernel) whether or not the max is requested.
-Those instances, with max_ptr in its own kargs mixin, compile to the same
-code as before. fmha_fwd_create_kargs_and_grids throws when max_ptr is set
-for an instance without kStoreRowMax, or together with sink_ptr.
+The instances that store it are chosen at compile time by a kStoreRowMax
+parameter of TileFmhaTraits and fmha_fwd_traits_; the dispatch selects them
+when max_ptr is set. Receipt 700 gets a _max variant of every qr, qr_async
+and qr_async_trload instance that stores the LSE and has no bias or dropout,
+sink instances included. All other instances keep their names and generate
+the same code as before, so callers that do not ask for the max pay nothing.
+With max_ptr set and no matching instance, fmha_fwd returns -1.
 
-Masked qr_async row-max instances with 32 < d <= 64 ask for four blocks per
-CU, which the extra register would otherwise drop to three.
+The pipelines keep an exact running row max, updated before the conditional
+rescale that can leave m up to 8 log2 units below it (from m_local when a
+sink seeds m), and store it next to the LSE in the same units. Masked
+qr_async row-max instances with 32 < d <= 64 ask for four blocks per CU,
+which the extra register would otherwise drop to three.
 
+diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
+index d12e88521..69a8df3eb 100644
+--- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
++++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
+@@ -6,7 +6,7 @@ import fnmatch
+ import itertools
+ import os
+ from collections import OrderedDict
+-from dataclasses import dataclass, field
++from dataclasses import dataclass, field, replace
+ from pathlib import Path
+ from typing import Callable, ClassVar, Iterable, List, Optional, Tuple
+ 
+@@ -104,7 +104,8 @@ using fmha_traits = ck_tile::TileFmhaTraits<{F_spad},
+                                             {F_qscale},
+                                             {F_occupancy},
+                                             {F_skip},
+-                                            {F_sink}>;
++                                            {F_sink},
++                                            {F_max}>;
+ 
+ using fmha_variant = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
+ 
+@@ -141,7 +142,7 @@ using fmha_kernel = {F_kernel}<fmha_pipeline, fmha_epilogue>;
+ 
+ 
+ using trait = fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode},{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
+-                        {F_pipeline_enum}, {F_logits}, fmha_mask, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}>;
++                        {F_pipeline_enum}, {F_logits}, fmha_mask, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_max}>;
+ 
+ template<>
+ float fmha_fwd_<trait, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_args a)
+@@ -247,9 +248,9 @@ FMHA_FWD_API_PER_HDIM_CASE = """{F_if}(t.hdim_q <= {F_hdim} && t.hdim_v <= {F_hd
+ }}
+ """
+ 
+-FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) &&
++FMHA_FWD_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.has_lse == {F_lse})  && (t.has_dropout == {F_dropout}) && (t.qscale_type == {F_qscale_check}) && (t.skip_min_seqlen_q == {F_skip}) &&(t.has_sink == {F_sink}) && ((a.max_ptr != nullptr) == {F_max}) &&
+         ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
+-    using trait_ = fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}>;
++    using trait_ = fmha_fwd_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, {F_lse}, {F_dropout}, {F_qscale}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_trload}, {F_skip}, {F_sink}, {F_max}>;
+     return fmha_fwd_<trait_, {F_arch.tag}>(s, a);
+ }}
+ """
+@@ -298,6 +299,7 @@ class FmhaFwdApiTrait:
+     tr_load: str
+     sink: str
+     constraint: CppConstraint
++    max: str = "f"  # also store the row max of the scores
+ 
+     @property
+     def name(self) -> str:
+@@ -405,6 +407,7 @@ class FmhaFwdPipeline:
+     F_trload: str  # true/false
+     F_sink: str  # true/false
+     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
++    F_max: str = "f"  # t/f, also store the row max of the scores next to the LSE
+ 
+     @property
+     def name(self) -> str:
+@@ -478,6 +481,8 @@ class FmhaFwdPipeline:
+             n += "_sink"
+         else:
+             n += "_nsink"
++        if self.F_max == "t":
++            n += "_max"
+ 
+         return n
+ 
+@@ -568,6 +573,7 @@ class FmhaFwdApiPool:
+                             F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
+                             F_qscale=QSCALE_MAP[trait.qscale],
+                             F_sink=BOOL_MAP[trait.sink],
++                            F_max=BOOL_MAP[trait.max],
+                             F_scheck=trait.scheck,
+                             F_seqtune=trait.seqtune(max_bm0),
+                             F_skcheck=trait.skcheck,
+@@ -718,6 +724,7 @@ class FmhaFwdKernel:
+             F_kernel=self._get_cpp_kernel_class_name(self.F_pipeline.tag),
+             F_kargs_creator=self._get_cpp_kargs_creator_func_name(self.F_pipeline.tag),
+             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
++            F_max=BOOL_MAP[self.F_pipeline.F_max],
+         )
+ 
+     @property
+@@ -762,6 +769,7 @@ class FmhaFwdKernel:
+             tr_load=self.F_pipeline.F_trload,
+             sink=self.F_pipeline.F_sink,
+             constraint=self.F_tile.F_constraint & self.F_pipeline.F_constraint,
++            max=self.F_pipeline.F_max,
+         )
+ 
+ 
+@@ -1591,6 +1599,28 @@ def get_product(receipt: int) -> Product:
+         return Product(name="Default", rule=fit)
+ 
+ 
++# Receipts that also get instances storing the row max of the scores next to the LSE, which the
++# dispatch selects when fmha_fwd_args::max_ptr is set, and the pipelines that support it.
++ROW_MAX_RECEIPTS = (700,)
++ROW_MAX_PIPELINES = ("qr", "qr_hpad", "qr_async", "qr_async_trload")
++
++
++def with_row_max_variants(
++    pipelines: Iterable[FmhaFwdPipeline], receipt
++) -> List[FmhaFwdPipeline]:
++    pipelines = list(pipelines)
++    if receipt not in ROW_MAX_RECEIPTS:
++        return pipelines
++    return pipelines + [
++        replace(p, F_max="t")
++        for p in pipelines
++        if p.tag in ROW_MAX_PIPELINES
++        and p.F_lse == "t"
++        and p.F_bias == "no"
++        and p.F_dropout == "f"
++    ]
++
++
+ def get_fwd_blobs(
+     targets: List[str], kernel_filter: Optional[str], receipt, optdim_list, mask_impl
+ ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
+@@ -1614,7 +1644,11 @@ def get_fwd_blobs(
+                 )
+ 
+             for tile, pipeline in itertools.product(
+-                tiles, factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl)
++                tiles,
++                with_row_max_variants(
++                    factory.get_pipelines(dtype, hdim, hdim_v, receipt, mask_impl),
++                    receipt,
++                ),
+             ):
+                 problem_ctx = ProblemContext(
+                     dtype=dtype, mode=mode, hdim=hdim, hdim_v=hdim_v
 diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_fwd.hpp b/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_fwd.hpp
-index 50ba8ffb6..ec84a0703 100644
+index 50ba8ffb6..77c885b50 100644
 --- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_fwd.hpp
 +++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/fmha_fwd.hpp
 @@ -14,6 +14,7 @@
@@ -30,30 +165,28 @@ index 50ba8ffb6..ec84a0703 100644
  #include <type_traits>
  #include <utility>
  #include <variant>
-@@ -351,6 +352,12 @@ struct fmha_fwd_args
+@@ -351,6 +352,11 @@ struct fmha_fwd_args
  
      ck_tile::index_t block_scale_size_q;
      ck_tile::index_t block_scale_size_kv;
 +
-+    // Optional fp32 per-row max logit: the max of the softmax inputs over the unmasked keys; -inf
-+    // for fully masked rows. Same layout and strides as lse_ptr. Needs an instance that stores the
-+    // LSE, has no bias, dropout or sink and uses the qr, qr_async or qr_async_trload pipeline, and
-+    // no sink_ptr; fmha_fwd_create_kargs_and_grids throws otherwise.
++    // Optional fp32 per-row max logit: the max of the softmax inputs over the unmasked keys,
++    // excluding the sink; -inf for fully masked rows. Same layout and strides as lse_ptr. Setting
++    // it selects the instances that store it (kStoreRowMax); fmha_fwd returns -1 if none matches.
 +    void* max_ptr = nullptr;
  };
  
  struct fmha_fwd_pagedkv_args
-@@ -859,6 +866,20 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
+@@ -859,6 +865,19 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
                                               args.head_start);
          }
      }();
 +    if constexpr(FmhaKernel::kStoreRowMax)
 +    {
-+        // the stored max relies on m starting at -inf, and a no-mask instance would start it at
-+        // the sink
-+        if(args.max_ptr != nullptr && args.sink_ptr != nullptr)
++        // without kHasSink the stored max relies on m starting at -inf, i.e. no sink passed in
++        if(!FmhaKernel::kHasSink && args.max_ptr != nullptr && args.sink_ptr != nullptr)
 +        {
-+            throw std::runtime_error("fmha_fwd: max_ptr does not support sink_ptr");
++            throw std::runtime_error("fmha_fwd: max_ptr with sink_ptr needs a sink instance");
 +        }
 +        kargs.max_ptr = args.max_ptr;
 +    }
@@ -64,6 +197,35 @@ index 50ba8ffb6..ec84a0703 100644
  
      if constexpr(FmhaKernel::kIsGroupMode)
      {
+@@ -877,6 +896,10 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
+ template <typename FmhaKernel>
+ auto fmha_fwd_v3_create_kargs_and_grids(fmha_fwd_args args)
+ {
++    if(args.max_ptr != nullptr)
++    {
++        throw std::runtime_error("fmha_fwd: max_ptr is not supported by this kernel instance");
++    }
+     /// NOTICE: This was borrowed from Aiter. Make sure the selected remap_opt setting truly
+     /// maximizes the kernel's performance.
+     int remap_opt = 2;
+@@ -1455,7 +1478,8 @@ template <ck_tile::index_t HDim_,
+           bool kPadDv_,
+           bool kUseTrLoad_,
+           bool kSkipMinSeqlenQ_ = false,
+-          bool kHasSink_        = false>
++          bool kHasSink_        = false,
++          bool kStoreRowMax_    = false>
+ struct fmha_fwd_traits_
+ {
+     static constexpr ck_tile::index_t HDim           = HDim_;
+@@ -1482,6 +1506,7 @@ struct fmha_fwd_traits_
+     static constexpr bool kUseTrLoad                 = kUseTrLoad_;
+     static constexpr bool kSkipMinSeqlenQ            = kSkipMinSeqlenQ_;
+     static constexpr bool kHasSink                   = kHasSink_;
++    static constexpr bool kStoreRowMax               = kStoreRowMax_;
+ };
+ 
+ template <ck_tile::index_t HDim_,
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha.hpp
 index 84d0a43a5..ca4d73795 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha.hpp
@@ -127,7 +289,7 @@ index 000000000..28bd497a1
 +
 +} // namespace ck_tile
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp
-index f8fe502e5..34c814f08 100644
+index f8fe502e5..acc6d11ab 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/kernel/fmha_fwd_kernel.hpp
 @@ -7,6 +7,7 @@
@@ -162,16 +324,22 @@ index f8fe502e5..34c814f08 100644
  // A helper struct for detecting ignore_fast_exp2 flag
  template <typename T, typename = void>
  struct has_ignore_fast_exp2_flag : std::false_type
-@@ -144,6 +162,8 @@ struct FmhaFwdKernel
+@@ -144,10 +162,14 @@ struct FmhaFwdKernel
      static constexpr bool kHasLogitsSoftCap = FmhaPipeline::kHasLogitsSoftCap;
      static constexpr auto BiasEnum          = FmhaPipeline::BiasEnum;
      static constexpr bool kStoreLSE         = FmhaPipeline::kStoreLSE;
-+    // the pipeline can also store the row max of the scores (max_ptr) next to the LSE
-+    static constexpr bool kStoreRowMax      = kStoreLSE && detail::stores_row_max_v<FmhaPipeline>;
++    // the pipeline also stores the row max of the scores (max_ptr) next to the LSE
++    static constexpr bool kStoreRowMax      = detail::stores_row_max_v<FmhaPipeline>;
      static constexpr bool kHasDropout       = FmhaPipeline::kHasDropout;
      static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
      static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
-@@ -315,6 +335,12 @@ struct FmhaFwdKernel
+     static constexpr bool kHasSink          = FmhaPipeline::kHasSink;
++    static_assert(kStoreRowMax == FmhaPipeline::Problem::kStoreRowMax,
++                  "the row max is requested from a pipeline that does not store it");
+ 
+     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
+     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
+@@ -315,6 +337,12 @@ struct FmhaFwdKernel
          ck_tile::index_t batch_stride_lse = 0;
      };
  
@@ -184,7 +352,7 @@ index f8fe502e5..34c814f08 100644
      struct FmhaFwdDropoutSeedOffset
      {
          template <typename T>
-@@ -392,7 +418,8 @@ struct FmhaFwdKernel
+@@ -392,7 +420,8 @@ struct FmhaFwdKernel
                                                      FmhaFwdBatchMXKargs,
                                                      FmhaFwdEmptyKargs<3>>>>,
            std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
@@ -194,7 +362,7 @@ index f8fe502e5..34c814f08 100644
      {
          ck_tile::index_t batch_stride_q;
          ck_tile::index_t batch_stride_k;
-@@ -424,7 +451,8 @@ struct FmhaFwdKernel
+@@ -424,7 +453,8 @@ struct FmhaFwdKernel
                                                      FmhaFwdEmptyKargs<3>>>>,
            std::conditional_t<kHasDropout, FmhaFwdCommonDropoutKargs, FmhaFwdEmptyKargs<4>>,
            std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
@@ -204,7 +372,7 @@ index f8fe502e5..34c814f08 100644
      {
          const int32_t* seqstart_q_ptr;
          const int32_t* seqstart_k_ptr;
-@@ -542,6 +570,7 @@ struct FmhaFwdKernel
+@@ -542,6 +572,7 @@ struct FmhaFwdKernel
                      {},               // placeholder for qscale
                      {},               // placeholder for dropout
                      {},               // placeholder for logits_soft_cap
@@ -212,7 +380,7 @@ index f8fe502e5..34c814f08 100644
                      batch_stride_q,
                      batch_stride_k,
                      batch_stride_v,
-@@ -998,6 +1027,7 @@ struct FmhaFwdKernel
+@@ -998,6 +1029,7 @@ struct FmhaFwdKernel
                      {},               // placeholder for dropout
                      {},               // placeholder for logits_soft_cap
                      {},               // placeholder for min_seqlen_q
@@ -220,7 +388,7 @@ index f8fe502e5..34c814f08 100644
                      reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                      reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                      reinterpret_cast<const int32_t*>(seqlen_q_ptr),
-@@ -1885,30 +1915,46 @@ struct FmhaFwdKernel
+@@ -1885,30 +1917,46 @@ struct FmhaFwdKernel
                  }
              }();
  
@@ -284,7 +452,7 @@ index f8fe502e5..34c814f08 100644
                  }
                  else
                  {
-@@ -2981,32 +3027,48 @@ struct FmhaFwdKernel
+@@ -2981,32 +3029,48 @@ struct FmhaFwdKernel
                  }
              }();
  
@@ -353,8 +521,20 @@ index f8fe502e5..34c814f08 100644
                  }
                  else
                  {
+diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_problem.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_problem.hpp
+index a8a8f96d3..1fc873e5a 100644
+--- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_problem.hpp
++++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_problem.hpp
+@@ -119,6 +119,7 @@ struct BlockFmhaPipelineProblem
+     static constexpr auto QScaleEnum        = Traits::QScaleEnum;
+     static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
+     static constexpr bool kHasSink          = Traits::kHasSink;
++    static constexpr bool kStoreRowMax      = Traits::kStoreRowMax;
+ };
+ 
+ template <typename QDataType_,
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp
-index 9e972d89e..b334977f0 100644
+index 9e972d89e..0469d8edc 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs.hpp
 @@ -6,6 +6,7 @@
@@ -369,10 +549,10 @@ index 9e972d89e..b334977f0 100644
      static constexpr bool kPaddedVecLoadStore = PaddedVecLoadStore_;
      static constexpr bool kUseHdimTailArgs    = kPadHeadDimQ || kPadHeadDimV;
  
-+    // Also stores the exact row max when max_ptr is set. Bias, dropout and sink instances leave it
-+    // out: there the extra live tile costs occupancy or spills whether or not the max is requested.
-+    static constexpr bool kStoreRowMax =
-+        kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !kHasDropout && !kHasSink;
++    // also stores the exact row max of the scores next to the LSE (max_ptr)
++    static constexpr bool kStoreRowMax = Problem::kStoreRowMax;
++    static_assert(!kStoreRowMax || (kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS),
++                  "the row max is stored next to the LSE and in the units of an unbiased score");
 +
      static constexpr ck_tile::index_t kQKScaleGranularity = Problem::kQKScaleGranularity;
      static constexpr ck_tile::index_t kVScaleGranularity  = Problem::kVScaleGranularity;
@@ -381,8 +561,8 @@ index 9e972d89e..b334977f0 100644
              set_tile(m, -numeric<SMPLComputeDataType>::infinity());
              clear_tile(l);
          }
-+        // Exact running row max of the scores, stored as the max logit if requested. Unlike m it
-+        // is never held back by the rescale skip below.
++        // Exact running row max of the scores, stored as the max logit. Unlike m it is never held
++        // back by the rescale skip below, and it does not include the sink.
 +        auto m_exact = MLBlockTileType{};
 +        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
          const auto q_origin = q_dram_window.get_window_origin();
@@ -403,20 +583,26 @@ index 9e972d89e..b334977f0 100644
                  }
  
                  // Note: here occ are all cleard, return it
-@@ -831,6 +849,12 @@ struct BlockFmhaPipelineQRKSVS
+@@ -831,6 +849,18 @@ struct BlockFmhaPipelineQRKSVS
              const auto m_old = m; // m{j-1}
              tile_elementwise_inout(
                  [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
 +            // Exact running row max, updated before the rescale skip below can reset m to m_old.
-+            // m starts at -inf (no sink), so max(m_exact, m) == max(m_exact, m_local).
-+            if constexpr(kStoreRowMax)
++            // Without a sink m starts at -inf, so max(m_exact, m) == max(m_exact, m_local) and
++            // reuses the max just computed; with a sink m includes it.
++            if constexpr(kStoreRowMax && kHasSink)
++            {
++                tile_elementwise_inout(
++                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
++            }
++            else if constexpr(kStoreRowMax)
 +            {
 +                tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m);
 +            }
  
              auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                  s.get_tile_distribution()); // Pcompute{j}
-@@ -1252,6 +1276,30 @@ struct BlockFmhaPipelineQRKSVS
+@@ -1252,6 +1282,30 @@ struct BlockFmhaPipelineQRKSVS
              });
  
              store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
@@ -448,7 +634,7 @@ index 9e972d89e..b334977f0 100644
  
          // finally, O
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp
-index 826bf64fc..284633a99 100644
+index 826bf64fc..e1a4d5447 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp
 @@ -6,6 +6,7 @@
@@ -463,10 +649,10 @@ index 826bf64fc..284633a99 100644
      static constexpr bool kHasDropout       = Problem::kHasDropout;
      static constexpr bool kHasSink          = Problem::kHasSink;
  
-+    // Also stores the exact row max when max_ptr is set. Bias, dropout and sink instances leave it
-+    // out: there the extra live tile costs occupancy or spills whether or not the max is requested.
-+    static constexpr bool kStoreRowMax =
-+        kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !kHasDropout && !kHasSink;
++    // also stores the exact row max of the scores next to the LSE (max_ptr)
++    static constexpr bool kStoreRowMax = Problem::kStoreRowMax;
++    static_assert(!kStoreRowMax || (kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS),
++                  "the row max is stored next to the LSE and in the units of an unbiased score");
 +
      static constexpr ck_tile::index_t kQKScaleGranularity = Problem::kQKScaleGranularity;
      static constexpr ck_tile::index_t kVScaleGranularity  = Problem::kVScaleGranularity;
@@ -476,7 +662,7 @@ index 826bf64fc..284633a99 100644
                  if constexpr(kPadSeqLenK && BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                      return 2;
 +                else if constexpr(kStoreRowMax && FmhaMask::IsMasking)
-+                    return 4; // the row-max tile would otherwise cost a block per CU
++                    return 4;
                  else
                      return 3;
              }
@@ -484,8 +670,8 @@ index 826bf64fc..284633a99 100644
              set_tile(m, -numeric<SMPLComputeDataType>::infinity());
              clear_tile(l);
          }
-+        // Exact running row max of the scores, stored as the max logit if requested. Unlike m it
-+        // is never held back by the rescale skip below.
++        // Exact running row max of the scores, stored as the max logit. Unlike m it is never held
++        // back by the rescale skip below, and it does not include the sink.
 +        auto m_exact = MLBlockTileType{};
 +        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
          __builtin_amdgcn_sched_barrier(0);
@@ -506,20 +692,26 @@ index 826bf64fc..284633a99 100644
                  }
  
                  // Note: here occ are all cleared, return it
-@@ -711,6 +731,12 @@ struct BlockFmhaPipelineQRKSVSAsync
+@@ -711,6 +731,18 @@ struct BlockFmhaPipelineQRKSVSAsync
              const auto m_old = m; // m{j-1}
              tile_elementwise_inout(
                  [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
 +            // Exact running row max, updated before the rescale skip below can reset m to m_old.
-+            // m starts at -inf (no sink), so max(m_exact, m) == max(m_exact, m_local).
-+            if constexpr(kStoreRowMax)
++            // Without a sink m starts at -inf, so max(m_exact, m) == max(m_exact, m_local) and
++            // reuses the max just computed; with a sink m includes it.
++            if constexpr(kStoreRowMax && kHasSink)
++            {
++                tile_elementwise_inout(
++                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
++            }
++            else if constexpr(kStoreRowMax)
 +            {
 +                tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m);
 +            }
  
              auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                  s.get_tile_distribution()); // Pcompute{j}
-@@ -1152,6 +1178,30 @@ struct BlockFmhaPipelineQRKSVSAsync
+@@ -1152,6 +1184,30 @@ struct BlockFmhaPipelineQRKSVSAsync
              });
  
              store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
@@ -551,7 +743,7 @@ index 826bf64fc..284633a99 100644
  
          // finally, O
 diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_trload.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_trload.hpp
-index e03d1f343..65453d359 100644
+index e03d1f343..1eef38396 100644
 --- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_trload.hpp
 +++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async_trload.hpp
 @@ -5,6 +5,7 @@
@@ -566,10 +758,10 @@ index e03d1f343..65453d359 100644
      static constexpr bool kHasUnevenSplits  = true;
      static constexpr bool kHasSink          = Problem::kHasSink;
  
-+    // Also stores the exact row max when max_ptr is set. Bias, dropout and sink instances leave it
-+    // out: there the extra live tile costs occupancy or spills whether or not the max is requested.
-+    static constexpr bool kStoreRowMax =
-+        kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !kHasDropout && !kHasSink;
++    // also stores the exact row max of the scores next to the LSE (max_ptr)
++    static constexpr bool kStoreRowMax = Problem::kStoreRowMax;
++    static_assert(!kStoreRowMax || (kStoreLSE && BiasEnum == BlockAttentionBiasEnum::NO_BIAS),
++                  "the row max is stored next to the LSE and in the units of an unbiased score");
 +
      static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
                     (kHasLogitsSoftCap && Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS ||
@@ -578,8 +770,8 @@ index e03d1f343..65453d359 100644
              set_tile(m, -numeric<SMPLComputeDataType>::infinity());
              clear_tile(l);
          }
-+        // Exact running row max of the scores, stored as the max logit if requested. Unlike m it
-+        // is never held back by the rescale skip below.
++        // Exact running row max of the scores, stored as the max logit. Unlike m it is never held
++        // back by the rescale skip below, and it does not include the sink.
 +        auto m_exact = MLBlockTileType{};
 +        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
  
@@ -600,20 +792,26 @@ index e03d1f343..65453d359 100644
                  }
  
                  // Note: here occ are all cleard, return it
-@@ -540,6 +558,12 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -540,6 +558,18 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              const auto m_old = m; // m{j-1}
              tile_elementwise_inout(
                  [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
 +            // Exact running row max, updated before the rescale skip below can reset m to m_old.
-+            // m starts at -inf (no sink), so max(m_exact, m) == max(m_exact, m_local).
-+            if constexpr(kStoreRowMax)
++            // Without a sink m starts at -inf, so max(m_exact, m) == max(m_exact, m_local) and
++            // reuses the max just computed; with a sink m includes it.
++            if constexpr(kStoreRowMax && kHasSink)
++            {
++                tile_elementwise_inout(
++                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
++            }
++            else if constexpr(kStoreRowMax)
 +            {
 +                tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m);
 +            }
  
              auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                  s_new.get_tile_distribution()); // Pcompute{j}
-@@ -724,6 +748,26 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -724,6 +754,26 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              });
  
              store_tile(lse_acc_dram_window_tmp, lse_acc);
@@ -640,18 +838,18 @@ index e03d1f343..65453d359 100644
          }
  
          // finally, O
-@@ -833,6 +877,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -833,6 +883,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              set_tile(m, -numeric<SMPLComputeDataType>::infinity());
              clear_tile(l);
          }
-+        // Exact running row max of the scores, stored as the max logit if requested. Unlike m it
-+        // is never held back by the rescale skip below.
++        // Exact running row max of the scores, stored as the max logit. Unlike m it is never held
++        // back by the rescale skip below, and it does not include the sink.
 +        auto m_exact = MLBlockTileType{};
 +        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
  
          const auto q_origin = q_dram_block_window_tmp.get_window_origin();
          const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
-@@ -860,6 +908,14 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -860,6 +914,14 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                      }
  
                      store_tile(lse_acc_dram_window_tmp, lse_acc);
@@ -666,20 +864,26 @@ index e03d1f343..65453d359 100644
                  }
  
                  // Note: here occ are all cleard, return it
-@@ -1116,6 +1172,12 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -1116,6 +1178,18 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              const auto m_old = m; // m{j-1}
              tile_elementwise_inout(
                  [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
 +            // Exact running row max, updated before the rescale skip below can reset m to m_old.
-+            // m starts at -inf (no sink), so max(m_exact, m) == max(m_exact, m_local).
-+            if constexpr(kStoreRowMax)
++            // Without a sink m starts at -inf, so max(m_exact, m) == max(m_exact, m_local) and
++            // reuses the max just computed; with a sink m includes it.
++            if constexpr(kStoreRowMax && kHasSink)
++            {
++                tile_elementwise_inout(
++                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
++            }
++            else if constexpr(kStoreRowMax)
 +            {
 +                tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m);
 +            }
  
              auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                  s_new.get_tile_distribution()); // Pcompute{j}
-@@ -1333,6 +1395,26 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -1333,6 +1407,26 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              });
  
              store_tile(lse_acc_dram_window_tmp, lse_acc);
@@ -706,18 +910,18 @@ index e03d1f343..65453d359 100644
          }
  
          // finally, O
-@@ -1439,6 +1521,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -1439,6 +1533,10 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              set_tile(m, -numeric<SMPLComputeDataType>::infinity());
              clear_tile(l);
          }
-+        // Exact running row max of the scores, stored as the max logit if requested. Unlike m it
-+        // is never held back by the rescale skip below.
++        // This body rescales on every new max, so m is the exact running row max and is stored
++        // as the max logit, unless it starts at the sink: then m_exact leaves the sink out.
 +        auto m_exact = MLBlockTileType{};
 +        set_tile(m_exact, -numeric<SMPLComputeDataType>::infinity());
  
          const auto q_origin = q_dram_block_window_tmp.get_window_origin();
          const auto [logical_seqlen_k_start, logical_seqlen_k_end] =
-@@ -1457,6 +1543,14 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -1457,6 +1555,14 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                          make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
                      set_tile(lse_acc, SMPLComputeDataType{sink_v * scale_s});
                      store_tile(lse_acc_dram_window_tmp, lse_acc);
@@ -732,20 +936,19 @@ index e03d1f343..65453d359 100644
                  }
  
                  // Note: here occ are all cleard, return it
-@@ -1700,6 +1794,12 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -1700,6 +1806,11 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              const auto m_old = m; // m{j-1}
              tile_elementwise_inout(
                  [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
-+            // Exact running row max, updated before the rescale skip below can reset m to m_old.
-+            // m starts at -inf (no sink), so max(m_exact, m) == max(m_exact, m_local).
-+            if constexpr(kStoreRowMax)
++            if constexpr(kStoreRowMax && kHasSink)
 +            {
-+                tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m);
++                tile_elementwise_inout(
++                    [](auto& e0, auto e1) { e0 = max(e0, e1); }, m_exact, m_local);
 +            }
  
              auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                  s_new.get_tile_distribution()); // Pcompute{j}
-@@ -1849,6 +1949,26 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
+@@ -1849,6 +1960,27 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
              });
  
              store_tile(lse_acc_dram_window_tmp, lse_acc);
@@ -758,13 +961,14 @@ index e03d1f343..65453d359 100644
 +                sweep_tile_span(lse_acc_spans[I0], [&](auto idx0) {
 +                    constexpr auto i_idx   = make_tuple(idx0);
 +                    constexpr auto r_log2e = static_cast<SMPLComputeDataType>(1.0 / C_LOG2E);
++                    const auto row_m       = kHasSink ? m_exact[i_idx] : m[i_idx];
 +                    if constexpr(kHasLogitsSoftCap)
 +                    {
-+                        row_max(i_idx) = m_exact[i_idx] * r_log2e;
++                        row_max(i_idx) = row_m * r_log2e;
 +                    }
 +                    else
 +                    {
-+                        row_max(i_idx) = m_exact[i_idx] * scale_s * r_log2e;
++                        row_max(i_idx) = row_m * scale_s * r_log2e;
 +                    }
 +                });
 +                store_row_max(lse_acc_dram_window_tmp, row_max);
@@ -772,3 +976,25 @@ index e03d1f343..65453d359 100644
          }
  
          // finally, O
+diff --git a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp
+index e7370cdb6..55b940b9a 100644
+--- a/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp
++++ b/3rdparty/composable_kernel/include/ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp
+@@ -24,7 +24,8 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
+           BlockAttentionQuantScaleEnum QScaleEnum_,
+           index_t kBlockPerCu_  = -1,    /* overwrite occupancy if not -1 */
+           bool kSkipMinSeqlenQ_ = false, /* skip min seqlen q while chunked prefill */
+-          bool kHasSink_        = false>
++          bool kHasSink_        = false,
++          bool kStoreRowMax_    = false>
+ struct TileFmhaTraits
+ {
+     static constexpr bool kPadSeqLenQ       = kPadSeqLenQ_;
+@@ -40,6 +41,7 @@ struct TileFmhaTraits
+     static constexpr index_t kBlockPerCu    = kBlockPerCu_;
+     static constexpr bool kSkipMinSeqlenQ   = kSkipMinSeqlenQ_;
+     static constexpr bool kHasSink          = kHasSink_;
++    static constexpr bool kStoreRowMax      = kStoreRowMax_;
+ };
+ 
+ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
