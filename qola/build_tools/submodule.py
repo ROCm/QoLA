@@ -108,6 +108,8 @@ def ensure_aiter_commit(
     5. Applies every ``*.patch`` file in *patches_dir* in lexicographic
        order via ``git apply --3way``. The first failing patch aborts the
        build with a pointer at the offending file.
+    6. ``git add --intent-to-add --all`` in AITER and its submodules, so
+       that ``git diff HEAD`` also shows the files the patches added.
 
     Local edits to the AITER checkout never survive a build — patches are
     the only sanctioned way to carry deltas. To skip the patch step,
@@ -145,6 +147,11 @@ def ensure_aiter_commit(
     _git(aiter_root, "submodule", "foreach", "--quiet", "--recursive", "git clean -fd")
 
     _apply_patches(aiter_root, patches_dir)
+    # Mark the files the patches added as intent-to-add: tools that key on `git diff HEAD`, like
+    # CK-JIT's blob cache, see them only then.
+    _git(aiter_root, "add", "--intent-to-add", "--all")
+    _git(aiter_root, "submodule", "foreach", "--quiet", "--recursive",
+         "git add --intent-to-add --all")
 
 
 def _apply_patches(aiter_root: str, patches_dir: Optional[str]) -> None:

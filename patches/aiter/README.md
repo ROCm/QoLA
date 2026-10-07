@@ -5,7 +5,9 @@ Drop unified-diff `*.patch` files in this directory. On every build,
 manifest's pinned AITER commit, force-syncs submodules (CK lives at
 AITER's `3rdparty/composable_kernel/` as a submodule), removes untracked
 files (`git clean -fd`, ignored build output is kept), then applies
-each patch in lexicographic filename order via `git apply --3way`.
+each patch in lexicographic filename order via `git apply --3way` and
+marks the files the patches add as intent-to-add, so that `git diff HEAD`
+(which CK-JIT hashes into its blob cache key) shows them.
 
 A failing patch hard-aborts the build — there are no `--reject` files
 and no silent skips. When a patch stops applying after an AITER bump,
