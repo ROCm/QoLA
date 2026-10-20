@@ -63,7 +63,7 @@ qola build \
 
 #### Skipping the checkout step
 
-By default, every `qola build` runs the wipe-and-reapply checkout: `git reset --hard` to the manifest's pinned commit, force-resync submodules, then reapply `patches/aiter/*.patch`. Pass `--skip-checkout` to opt out:
+By default, every `qola build` runs the wipe-and-reapply checkout: `git reset --hard` to the manifest's pinned commit, force-resync submodules, remove untracked files (`git clean -fd`), then reapply `patches/aiter/*.patch`. Pass `--skip-checkout` to opt out:
 
 ```bash
 # Run checkout once...
