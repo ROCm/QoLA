@@ -28,7 +28,7 @@ index c80fef1fb1..b5f18c94be 100644
          return asm_ret;
  
 +    if(a.v3_api_check)
-+        return 1;
++        return -1;
 +
      if(a.is_group_mode && (a.seqstart_q_ptr == nullptr || a.seqstart_k_ptr == nullptr))
      {
