@@ -19,10 +19,10 @@ index 359fc732f2..cb419345ad 100644
          "flags_extra_hip": [
 @@ -1803,7 +1804,8 @@
          "blob_gen_cmd": [
-             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --targets {','.join(validate_and_update_archs())} --output_dir {{}}'",
-             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --targets {','.join(validate_and_update_archs())} --output_dir {{}}'",
--            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {','.join(validate_and_update_archs())} --output_dir {{}}'"
-+            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {','.join(validate_and_update_archs())} --output_dir {{}}'",
+             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
+             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'"
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
 +            "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_fwd_bf16 --output_dir {{}}'"
          ]
      },
