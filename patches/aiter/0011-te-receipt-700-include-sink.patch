@@ -1,0 +1,32 @@
+Subject: CK: allow softmax-sink instances in FMHA receipt 700
+
+TransformerEngine still builds fused attention with receipt 700. Upstream
+receipt 700 filtered F_sink=="f", which omitted _sink kernels after the
+AITER a50a62a bump. Restore both sink and nsink variants (same as the
+pre-#709 TE receipt-700 patch).
+
+diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
+index e9efbe59..d12e8852 100644
+--- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
++++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
+@@ -1543,7 +1543,6 @@ def get_product(receipt: int) -> Product:
+             cond &= kernel_ctx.pipeline.F_qscale == "no"
+             cond &= kernel_ctx.pipeline.F_lse == "t"
+             cond &= kernel_ctx.pipeline.F_skip == "f"
+-            cond &= kernel_ctx.pipeline.F_sink == "f"
+             cond &= kernel_ctx.pipeline.F_logits == "f"
+             return cond
+ 
+diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/generate.py b/3rdparty/composable_kernel/example/ck_tile/01_fmha/generate.py
+index bfd81cd3..c3fcc960 100644
+--- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/generate.py
++++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/generate.py
+@@ -155,7 +155,7 @@ if __name__ == "__main__":
+         + "  400-499: Only generate instance for Aiter(mha_varlen_bwd) integration\n"
+         + "  600-699: Only generate instance for aiter::mha_fwd && aiter::mha_fwd_splitkv && aiter::mha_bwd C++ api integration\n"
+         + "  700: Only generate instance for TransformerEngine integration (fwd + bwd, fp16/bf16 only,\n"
+-        + "        invariants: row vlayout, has_lse, no skip/sink/logits/qscale)",
++        + "        invariants: row vlayout, has_lse, no skip/logits/qscale)",
+     )
+ 
+     parser.add_argument(
