@@ -1,5 +1,10 @@
+Subject: Wrap gfx1250 V3 FWD w/ sink kernels to mha_fwd call
+
+Build fwd_with_sink dispatch and kernels into libmha_fwd
+and dispatch them from mha_fwd call if sink_ptr is set
+
 diff --git a/aiter/jit/optCompilerConfig.json b/aiter/jit/optCompilerConfig.json
-index 08090c1422..6f179fd91a 100644
+index 359fc732f2..cb419345ad 100644
 --- a/aiter/jit/optCompilerConfig.json
 +++ b/aiter/jit/optCompilerConfig.json
 @@ -1778,7 +1778,8 @@
@@ -14,10 +19,10 @@ index 08090c1422..6f179fd91a 100644
          "flags_extra_hip": [
 @@ -1803,7 +1804,8 @@
          "blob_gen_cmd": [
-             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --output_dir {{}}'",
-             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --output_dir {{}}'",
--            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --output_dir {{}}'"
-+            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --output_dir {{}}'",
+             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
+             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'"
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
 +            "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_fwd_bf16 --output_dir {{}}'"
          ]
      },
