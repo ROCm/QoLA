@@ -1,8 +1,8 @@
 [qola]
-# Tip of origin/zain/torch-free/a4w4-poc (previous pin: d32b0cb62).
-# QoLA-owned deltas live in patches/aiter/*.patch and are reapplied on
-# every build.
-aiter_commit = "8aa6101d4"
+# AITER main (contains the a4w4-poc torch-free work upstreamed as #4124;
+# previous pin: 8aa6101d4).  QoLA-owned deltas live in patches/aiter/*.patch
+# and are reapplied on every build.
+aiter_commit = "16979d75774f00e5e8905bcf5f2216230093e441"
 namespace = "te"
 rocm_versions = ["7"]
 

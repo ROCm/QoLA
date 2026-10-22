@@ -1,48 +1,40 @@
 Subject: Forward GPU targets to CK and drop cref dump
 
-diff --git a/aiter/jit/core.py b/aiter/jit/core.py
-index bd023fd0a..96bf4d9e9 100644
---- a/aiter/jit/core.py
-+++ b/aiter/jit/core.py
-@@ -725,6 +725,20 @@ def rename_cpp_to_cu(els, dst, hipify, recursive=False):
-     return ret
- 
- 
-+def _inject_codegen_targets(blob_gen_cmd, archs):
-+    """Inject --targets so CK codegen only produces instances for *archs*."""
-+    targets_arg = f"--targets {','.join(archs)}"
-+
-+    def inject(cmd):
-+        if "generate.py" in cmd and "--targets" not in cmd:
-+            return cmd.replace("generate.py ", f"generate.py {targets_arg} ", 1)
-+        return cmd
-+
-+    if isinstance(blob_gen_cmd, list):
-+        return [inject(cmd) if cmd else cmd for cmd in blob_gen_cmd]
-+    return inject(blob_gen_cmd) if blob_gen_cmd else blob_gen_cmd
-+
-+
- def _stage_blob_sources(
-     blob_gen_cmd, op_dir, src_dir, sources, hipify, seed_files=None
- ):
-@@ -1177,6 +1191,8 @@ def build_module(
-         flags_hip = sorted(set(flags_hip))  # remove same flags
-         flags_hip = [el for el in flags_hip if hip_flag_checker(el)]
-         check_and_set_ninja_worker()
-+        nonlocal blob_gen_cmd
-+        blob_gen_cmd = _inject_codegen_targets(blob_gen_cmd, archs)
- 
-         blob_dir = f"{op_dir}/blob"
-         staged_blob_dir = None
+diff --git a/aiter/jit/optCompilerConfig.json b/aiter/jit/optCompilerConfig.json
+index 09ca6e6fc5..1c42d8149c 100644
+--- a/aiter/jit/optCompilerConfig.json
++++ b/aiter/jit/optCompilerConfig.json
+@@ -1792,9 +1792,9 @@
+         "is_standalone": "False",
+         "torch_exclude": "True",
+         "blob_gen_cmd": [
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --output_dir {{}}'",
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --output_dir {{}}'",
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --output_dir {{}}'"
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'"
+         ]
+     },
+     "libmha_bwd": {
+@@ -1814,7 +1814,7 @@
+         "is_standalone": "False",
+         "torch_exclude": "True",
+         "blob_gen_cmd": [
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 600 --output_dir {{}}'"
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'"
+         ]
+     },
+     "module_rocsolgemm": {
 diff --git a/aiter/jit/utils/cpp_extension.py b/aiter/jit/utils/cpp_extension.py
-index 6b0eb74ec..f4d4a1be2 100644
+index f392452ca8..95abfcfafd 100644
 --- a/aiter/jit/utils/cpp_extension.py
 +++ b/aiter/jit/utils/cpp_extension.py
-@@ -1482,7 +1482,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone, torch_exc
-     extra_ldflags.append("-ffunction-sections")
-     extra_ldflags.append("-fdata-sections ")
-     extra_ldflags.append("-Wl,--gc-sections")
--    extra_ldflags.append("-Wl,--cref")
+@@ -1559,7 +1559,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone, torch_exc
+         extra_ldflags.append("-ffunction-sections")
+         extra_ldflags.append("-fdata-sections ")
+         extra_ldflags.append("-Wl,--gc-sections")
+-        extra_ldflags.append("-Wl,--cref")
      if not torch_exclude:
          import torch
  

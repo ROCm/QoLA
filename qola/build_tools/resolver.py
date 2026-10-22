@@ -119,6 +119,13 @@ def _build_aiter_configs(core_path: str, aiter_root_dir: str) -> Any:
 # eval globals
 # ------------------------------------------------------------------
 
+def validate_and_update_archs():
+    """Detertmine AITER build arch
+    Lightweight alternative of aiter jit/core.py method"""
+    archs = os.getenv("GPU_ARCHS", "native").split(";")
+    archs = [arch.strip() for arch in archs]
+    return archs
+
 
 def make_eval_globals(ns: AiterNamespace) -> dict[str, Any]:
     """Return a globals dict for ``eval()``-ing optCompilerConfig.json fields.
@@ -145,6 +152,8 @@ def make_eval_globals(ns: AiterNamespace) -> dict[str, Any]:
         "int": int,
         "str": str,
         "hasattr": hasattr,
+        # jit methods used by build config
+        "validate_and_update_archs": validate_and_update_archs,
     }
     # torch is imported lazily inside convert() when the eval string
     # contains "torch".  Pre-populate if available.
