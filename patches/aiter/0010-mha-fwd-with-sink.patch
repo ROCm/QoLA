@@ -82,7 +82,7 @@ index 62132d9ac5..d45109f328 100644
 +bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
 +{
 +    // ---- guard conditions --------------------------------------------------
-+    if(get_gpu_arch() != "gfx1250") return false;
++    if(!get_gpu_arch().starts_with("gfx1250")) return false;
 +    if(a.data_type != "bf16") return false;
 +    if(a.is_group_mode) return false;  // varlen: not supported here
 +    if(a.hdim_q != 64 && a.hdim_q != 128) return false;
