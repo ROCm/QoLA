@@ -1,6 +1,9 @@
-Subject: Use device function for bwd workspace prepare
+Subject: mha_bwd: drop the pinned_host_alloc requirement
 
-Remove pinned_host_alloc from API
+CK now prepares the bwd workspace metadata with an on-device kernel (no pinned
+host staging), and keeps a prepare_workspace_async overload that ignores the
+allocator. Remove the now-unused mha_bwd_args::pinned_host_alloc field and the
+group-mode check that rejected callers (TransformerEngine) that leave it empty.
 
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
 index c12cca553b..4abea57df5 100644

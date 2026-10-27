@@ -12,6 +12,9 @@
  */
 {
   global:
+    /* C-linkage exports use a qola_[<namespace>_] symbol prefix instead of a
+     * C++ namespace (see QOLA_C in qola_common.h). */
+    qola_*;
     extern "C++" {
       qola::*;
       "typeinfo for qola::*";
