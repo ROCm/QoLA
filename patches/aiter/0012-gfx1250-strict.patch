@@ -1,5 +1,5 @@
 diff --git a/aiter/jit/core.py b/aiter/jit/core.py
-index aca08d691f..e36dfd6ec6 100644
+index aca08d691f..bec3279 100644
 --- a/aiter/jit/core.py
 +++ b/aiter/jit/core.py
 @@ -822,6 +822,7 @@ def validate_and_update_archs():
@@ -10,6 +10,20 @@ index aca08d691f..e36dfd6ec6 100644
      ]
  
      # Validate if each element in archs is in allowed_archs
+@@ -1390,6 +1391,13 @@ def build_module(
+             get_gfx() == "gfx1250" or "gfx1250" in os.environ.get("GPU_ARCHS", "")
+         ) and hip_version >= Version("7.0.0"):
+             flags_hip += ["-DAITER_ENABLE_CLUSTER_LAUNCH"]
++        # CK's unified MMA framework (USE_NEW_UNIFIED_FRAMEWORK, default 1 since
++        # rocm-libraries#11646) does not build for gfx1250: the gfx1250 amdgcn_mma
++        # exec() is not a template, and the FMHA TDM pipeline's transposed V
++        # register layout no longer matches the unified B-warp encoding. Stay on
++        # the legacy WarpGemm path for gfx1250 until CK fixes both.
++        if get_gfx() == "gfx1250" or "gfx1250" in os.environ.get("GPU_ARCHS", ""):
++            flags_hip += ["-DUSE_NEW_UNIFIED_FRAMEWORK=0"]
+ 
+         if not torch_exclude:
+             import torch
 diff --git a/aiter/jit/utils/chip_info.py b/aiter/jit/utils/chip_info.py
 index 06a7ed6a1b..b89da63446 100644
 --- a/aiter/jit/utils/chip_info.py
