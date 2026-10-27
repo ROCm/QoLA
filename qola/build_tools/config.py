@@ -38,6 +38,7 @@ class BuildSpec:
     hipify: bool = False
     hip_clang_path: Optional[str] = None
     hsa_subdirs: List[str] = field(default_factory=list)
+    flags_extra_hip_per_source: Dict[str, List[str]] = field(default_factory=dict)
 
 
 # Defaults matching core.py's d_opt_build_args (line 712, commit 33f2e6af)
@@ -414,7 +415,16 @@ def _eval_entry(
     resolved["md_name"] = op_name
 
     for key, val in raw.items():
-        if isinstance(val, list):
+        if isinstance(val, dict):
+            # e.g. flags_extra_hip_per_source: {glob: [eval-able flag, ...]}
+            resolved[key] = {
+                k: (
+                    [eval(el, eval_globals) if isinstance(el, str) else el for el in v]  # noqa: S307
+                    if isinstance(v, list) else v
+                )
+                for k, v in val.items()
+            }
+        elif isinstance(val, list):
             evaled = []
             for el in val:
                 if isinstance(el, str):
@@ -446,6 +456,7 @@ def _eval_entry(
         third_party=list(resolved.get("third_party", [])),
         hipify=bool(resolved.get("hipify", False)),
         hip_clang_path=resolved.get("hip_clang_path"),
+        flags_extra_hip_per_source=dict(resolved.get("flags_extra_hip_per_source") or {}),
     )
 
 
