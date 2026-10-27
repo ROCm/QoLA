@@ -43,7 +43,7 @@ index 5ef75f4b7..49b762d9a 100644
  #include <memory>
  #include <string>
  
-@@ -364,10 +367,209 @@ float fmha_fwd_ck(mha_fwd_args a, const ck_tile::stream_config& s)
+@@ -364,10 +367,214 @@ float fmha_fwd_ck(mha_fwd_args a, const ck_tile::stream_config& s)
  }
  #endif
  
@@ -170,6 +170,11 @@ index 5ef75f4b7..49b762d9a 100644
 +        return -1.f;
 +    if(a.num_splits <= 0 || !a.splitkv_workspace_ptr)
 +        return -1.f;
++
++    if(a.v3_api_check)
++    {
++        return 1.f;
++    }
 +
 +    const int G       = a.num_splits;
 +    const int B       = a.batch;

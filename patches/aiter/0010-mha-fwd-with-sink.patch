@@ -66,7 +66,7 @@ index 62132d9ac5..d45109f328 100644
  #include <memory>
  #include <string>
  
-@@ -571,6 +599,156 @@ static float fmha_fwd_native_splitkv(const mha_fwd_args& a, const ck_tile::strea
+@@ -571,6 +599,164 @@ static float fmha_fwd_native_splitkv(const mha_fwd_args& a, const ck_tile::strea
  }
  #endif
  
@@ -82,7 +82,8 @@ index 62132d9ac5..d45109f328 100644
 +bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
 +{
 +    // ---- guard conditions --------------------------------------------------
-+    if(!get_gpu_arch().starts_with("gfx1250")) return false;
++    // Exact match, as in fmha_fwd_with_sink_asm: the asm kernels exist for gfx1250 only.
++    if(get_gpu_arch() != "gfx1250") return false;
 +    if(a.data_type != "bf16") return false;
 +    if(a.is_group_mode) return false;  // varlen: not supported here
 +    if(a.hdim_q != 64 && a.hdim_q != 128) return false;
@@ -111,6 +112,13 @@ index 62132d9ac5..d45109f328 100644
 +    if (!mha_fwd_with_sink_supported(a)) return -1.f;
 +    if (a.q_descale_ptr || a.k_descale_ptr || a.v_descale_ptr) return -1.f;
 +    if (!a.sink_ptr) return -1.f;
++    // The kernel ABI needs an LSE buffer even without return_lse (running state).
++    if (!a.lse_ptr) return -1.f;
++
++    if(a.v3_api_check)
++    {
++        return 1.f;
++    }
 +
 +    // ---- build aiter_tensor_t descriptors from mha_fwd_args ---------------
 +    // Strides are in elements (matching aiter_tensor_t convention).
@@ -223,7 +231,7 @@ index 62132d9ac5..d45109f328 100644
  float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
  {
      float ret = -1;
-@@ -583,6 +761,12 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
+@@ -583,6 +769,12 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
          return fmha_fwd_native_splitkv(args, s);
  #endif
  
