@@ -1,14 +1,13 @@
-diff --git a/3rdparty/composable_kernel b/3rdparty/composable_kernel
---- a/3rdparty/composable_kernel
-+++ b/3rdparty/composable_kernel
-@@ -1 +1 @@
--Subproject commit f33252cebe5a52362ec1ee12c124dde7800dda3a
-+Subproject commit f33252cebe5a52362ec1ee12c124dde7800dda3a-dirty
+Subject: Wrap gfx1250 V3 FWD w/ sink kernels to mha_fwd call
+
+Build fwd_with_sink dispatch and kernels into libmha_fwd
+and dispatch them from mha_fwd call if sink_ptr is set
+
 diff --git a/aiter/jit/optCompilerConfig.json b/aiter/jit/optCompilerConfig.json
-index dfd8a964a..fd3a0d02c 100644
+index 359fc732f2..cb419345ad 100644
 --- a/aiter/jit/optCompilerConfig.json
 +++ b/aiter/jit/optCompilerConfig.json
-@@ -1524,7 +1524,8 @@
+@@ -1778,7 +1778,8 @@
              "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd_batch_prefill.cu'",
              "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_msk0_split.cu'",
              "f'{AITER_CSRC_DIR}/kernels/mha_native/fmha_fwd_d64_bf16_msk1_split.cu'",
@@ -18,18 +17,18 @@ index dfd8a964a..fd3a0d02c 100644
          ],
          "flags_extra_cc": [],
          "flags_extra_hip": [
-@@ -1549,7 +1550,8 @@
+@@ -1803,7 +1804,8 @@
          "blob_gen_cmd": [
-             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --output_dir {{}}'",
-             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --output_dir {{}}'",
--            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --output_dir {{}}'"
-+            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --output_dir {{}}'",
+             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
+             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
+-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'"
++            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill --receipt 600 --targets {\",\".join(validate_and_update_archs())} --output_dir {{}}'",
 +            "f'{AITER_META_DIR}/hsa/codegen.py -m fmha_fwd_bf16 --output_dir {{}}'"
          ]
      },
      "libmha_bwd": {
 diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
-index 49b762d9a..a7a46bcdd 100644
+index 62132d9ac5..d45109f328 100644
 --- a/csrc/cpp_itfs/mha_fwd.cu
 +++ b/csrc/cpp_itfs/mha_fwd.cu
 @@ -6,6 +6,34 @@
@@ -67,7 +66,7 @@ index 49b762d9a..a7a46bcdd 100644
  #include <memory>
  #include <string>
  
-@@ -558,6 +586,156 @@ static float fmha_fwd_native_splitkv(const mha_fwd_args& a, const ck_tile::strea
+@@ -571,6 +599,156 @@ static float fmha_fwd_native_splitkv(const mha_fwd_args& a, const ck_tile::strea
  }
  #endif
  
@@ -224,7 +223,7 @@ index 49b762d9a..a7a46bcdd 100644
  float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
  {
      float ret = -1;
-@@ -570,6 +748,12 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
+@@ -583,6 +761,12 @@ float mha_fwd(mha_fwd_args args, const ck_tile::stream_config& s)
          return fmha_fwd_native_splitkv(args, s);
  #endif
  
@@ -238,7 +237,7 @@ index 49b762d9a..a7a46bcdd 100644
      ret = fmha_fwd_v3(args, s);
  #endif
 diff --git a/csrc/include/mha_fwd.h b/csrc/include/mha_fwd.h
-index 0f33dd6e0..09f1ef1b0 100644
+index 0f33dd6e00..09f1ef1b04 100644
 --- a/csrc/include/mha_fwd.h
 +++ b/csrc/include/mha_fwd.h
 @@ -379,5 +379,10 @@ __attribute__((visibility("default"))) int mha_fwd_calculate_num_splits(const mh
