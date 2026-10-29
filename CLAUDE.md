@@ -100,7 +100,7 @@ AITER is **not** a submodule of this repo — it is cloned on demand into `build
 
 If `build/third_party/aiter/` does not yet exist, the first build clones `https://github.com/ROCm/aiter.git` into it (partial clone, `--filter=blob:none`) and checks out the manifest's commit. Subsequent builds reuse the same checkout, fetching new commits as needed. Delete the directory to force a fresh clone.
 
-Wipe-and-reapply policy: every build resets the AITER checkout to the requested commit (`git reset --hard`), force-syncs submodules (`git submodule update --init --recursive --force`), then reapplies QoLA's patches. Local edits in `build/third_party/aiter/` never survive a build — the patch directory is the only sanctioned way to carry deltas.
+Wipe-and-reapply policy: every build resets the AITER checkout to the requested commit (`git reset --hard`), force-syncs submodules (`git submodule update --init --recursive --force`), removes untracked files (`git clean -fd`, also in submodules), then reapplies QoLA's patches. Local edits in `build/third_party/aiter/` never survive a build — the patch directory is the only sanctioned way to carry deltas.
 
 ## AITER patches
 

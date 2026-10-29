@@ -1,0 +1,61 @@
+Subject: AITER: mha_fwd_args::max_logits_ptr for the per-row max logits
+
+Forward an optional max_logits_ptr (laid out like lse_ptr) to the CK forward, whose dispatch
+then picks the instances that write the exact per-row max logits next to the LSE (needs 0013).
+The asm paths (v3 and the gfx1250 sink kernel) are skipped when it is set, and the native
+split-K path rejects it.
+
+diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
+index 5c24fd3a1..eeb61a02c 100644
+--- a/csrc/cpp_itfs/mha_fwd.cu
++++ b/csrc/cpp_itfs/mha_fwd.cu
+@@ -244,6 +244,8 @@ float fmha_fwd_v3(mha_fwd_args a, const ck_tile::stream_config& s)
+ {
+     if(!a.use_asm_v3)
+         return -1;
++    if(a.max_logits_ptr != nullptr) // the asm kernels do not write the max logits
++        return -1;
+ 
+     std::string arch_id = get_gpu_arch();
+ 
+@@ -403,6 +405,7 @@ float fmha_fwd_ck(mha_fwd_args a, const ck_tile::stream_config& s)
+                        .drop_seed_offset           = a.drop_seed_offset,
+                        .block_scale_size_q         = a.block_scale_size_q,
+                        .block_scale_size_kv        = a.block_scale_size_kv};
++    args.max_logits_ptr = a.max_logits_ptr;
+ 
+     return fmha_fwd(traits, args, s);
+ }
+@@ -471,6 +474,8 @@ bool native_splitkv_check_eligigibility(const mha_fwd_args& a)
+         return false;
+     if(a.sink_size != 0)  // scalar check only; sink_ptr not checked here
+         return false;
++    if(a.max_logits_ptr != nullptr)  // the split-K kernels do not write the max logits
++        return false;
+     // Only full causal (mask_type 1 or 2) or no mask (mask_type 0).
+     // SWA (window_size_left != -1) falls through to ASM/CK.
+     const bool causal = (a.mask_type == 1 || a.mask_type == 2);
+@@ -619,6 +624,7 @@ bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
+     // Exact match, as in fmha_fwd_with_sink_asm: the asm kernels exist for gfx1250 only.
+     if(get_gpu_arch() != "gfx1250") return false;
+     if(a.data_type != "bf16") return false;
++    if(a.max_logits_ptr != nullptr) return false;  // the asm kernel does not write the max logits
+     if(a.is_group_mode) return false;  // varlen: not supported here
+     if(a.hdim_q != 64 && a.hdim_q != 128) return false;
+     if(a.hdim_v != a.hdim_q) return false;
+diff --git a/csrc/include/mha_fwd.h b/csrc/include/mha_fwd.h
+index 09f1ef1b0..6ebbe441b 100644
+--- a/csrc/include/mha_fwd.h
++++ b/csrc/include/mha_fwd.h
+@@ -249,6 +249,11 @@ struct mha_fwd_args
+     //   num_splits * batch * nhead_q * seqlen_q * (kHeadDim + 1) * sizeof(float)
+     int   num_splits            = 0;       // number of KV-axis splits (from mha_fwd_calculate_num_splits)
+     void* splitkv_workspace_ptr = nullptr; // caller-owned device scratch buffer (see above)
++
++    // Optional fp32 per-row max logits, same layout and strides as lse_ptr (see CK
++    // fmha_fwd_args::max_logits_ptr). Needs has_lse. Only the CK tile path writes it: the asm
++    // paths are skipped and the native split-K path rejects it.
++    void* max_logits_ptr = nullptr;
+ };
+ 
+ #if ENABLE_CK
