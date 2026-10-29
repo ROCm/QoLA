@@ -43,7 +43,7 @@ index 5ef75f4b7..49b762d9a 100644
  #include <memory>
  #include <string>
  
-@@ -364,10 +367,209 @@ float fmha_fwd_ck(mha_fwd_args a, const ck_tile::stream_config& s)
+@@ -364,10 +367,214 @@ float fmha_fwd_ck(mha_fwd_args a, const ck_tile::stream_config& s)
  }
  #endif
  
@@ -96,7 +96,7 @@ index 5ef75f4b7..49b762d9a 100644
 +    // Pointer-presence checks (q_descale_ptr, sink_ptr) are intentionally
 +    // omitted here: the caller may not have allocated those buffers yet at
 +    // planning time. fmha_fwd_native_splitkv() validates them.
-+    if(get_gpu_arch() == "gfx1250") //matches kernels device compile arch guards
++    if(get_gpu_arch().starts_with("gfx1250")) //matches kernels device compile arch guards
 +        return false;
 +    if(a.data_type != "bf16")
 +        return false;
@@ -170,6 +170,11 @@ index 5ef75f4b7..49b762d9a 100644
 +        return -1.f;
 +    if(a.num_splits <= 0 || !a.splitkv_workspace_ptr)
 +        return -1.f;
++
++    if(a.v3_api_check)
++    {
++        return 1.f;
++    }
 +
 +    const int G       = a.num_splits;
 +    const int B       = a.batch;
@@ -297,7 +302,7 @@ index 9c207bbf6..8faaa9ef6 100644
  
  __global__ void __launch_bounds__(kBlockSize, 4)
  fmha_fwd_d64_bf16_msk0_split(FmhaFwdSplitParams sp) {
-+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__gfx1250__)
++#if defined(__HIP_DEVICE_COMPILE__) && !defined(__GFX12__)
      __shared__ char lds[kLdsBytes];
      const int head_idx   = blockIdx.x;
      const int m_tile_idx = blockIdx.y;                  // natural order (no mask)
@@ -317,7 +322,7 @@ index ee77f9c4c..eeb1f1eb0 100644
  
  __global__ void __launch_bounds__(kBlockSize, 4)
  fmha_fwd_d64_bf16_msk1_split(FmhaFwdSplitParams sp) {
-+#if defined(__HIP_DEVICE_COMPILE__) && !defined(__gfx1250__)
++#if defined(__HIP_DEVICE_COMPILE__) && !defined(__GFX12__)
      __shared__ char lds[kLdsBytes];
      const int head_idx   = blockIdx.x;
      // Causal load balance: launch heavy high-index tiles first (matches CK).
@@ -360,7 +365,7 @@ index 72cf2dec1..233fdc8e2 100644
  #include <hip/hip_runtime.h>
 +//builtins below fail to compile on gfx1250, missing target features:
 +//vmem-to-lds-load-insts, mai-insts
-+#if !defined(__HIP_DEVICE_COMPILE__) || !defined(__gfx1250__)
++#if !defined(__HIP_DEVICE_COMPILE__) || !defined(__GFX12__)
  #include "runner/params.hpp"
  #include "op_lds.hpp"
  #include "op_gemm.hpp"

@@ -1,12 +1,12 @@
 Subject: AITER: mha_fwd_args::max_logits_ptr for the per-row max logits
 
 Forward an optional max_logits_ptr (laid out like lse_ptr) to the CK forward, whose dispatch
-then picks the instances that write the exact per-row max logits next to the LSE (needs 0012).
+then picks the instances that write the exact per-row max logits next to the LSE (needs 0013).
 The asm paths (v3 and the gfx1250 sink kernel) are skipped when it is set, and the native
 split-K path rejects it.
 
 diff --git a/csrc/cpp_itfs/mha_fwd.cu b/csrc/cpp_itfs/mha_fwd.cu
-index d45109f32..b7f047012 100644
+index 5c24fd3a1..eeb61a02c 100644
 --- a/csrc/cpp_itfs/mha_fwd.cu
 +++ b/csrc/cpp_itfs/mha_fwd.cu
 @@ -244,6 +244,8 @@ float fmha_fwd_v3(mha_fwd_args a, const ck_tile::stream_config& s)
@@ -35,8 +35,8 @@ index d45109f32..b7f047012 100644
      // Only full causal (mask_type 1 or 2) or no mask (mask_type 0).
      // SWA (window_size_left != -1) falls through to ASM/CK.
      const bool causal = (a.mask_type == 1 || a.mask_type == 2);
-@@ -613,6 +618,7 @@ bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
-     // ---- guard conditions --------------------------------------------------
+@@ -619,6 +624,7 @@ bool mha_fwd_with_sink_supported(const mha_fwd_args& a)
+     // Exact match, as in fmha_fwd_with_sink_asm: the asm kernels exist for gfx1250 only.
      if(get_gpu_arch() != "gfx1250") return false;
      if(a.data_type != "bf16") return false;
 +    if(a.max_logits_ptr != nullptr) return false;  // the asm kernel does not write the max logits

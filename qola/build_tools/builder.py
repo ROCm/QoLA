@@ -282,6 +282,7 @@ def _invoke_build(build_module_fn, spec: BuildSpec, verbose: bool) -> None:
             torch_exclude=spec.torch_exclude,
             third_party=spec.third_party,
             hipify=spec.hipify,
+            flags_extra_hip_per_source=spec.flags_extra_hip_per_source,
         )
     finally:
         if spec.hip_clang_path:
