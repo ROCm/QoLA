@@ -1,0 +1,28 @@
+Subject: CK: generate FP8 forward instances for TE receipt 700
+
+TransformerEngine uses receipt 700 for its C++ FMHA interface. Include the
+validated FP8 E4M3-input/BF16-output forward variants needed by TE: per-tensor
+descaling and row-major V. GFX9 FP8 tile pipelines are inference-only and do
+not write LSE, so those instances must be kept alongside the LSE variants
+used by the D128 V3 path.
+
+diff --git a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
+--- a/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
++++ b/3rdparty/composable_kernel/example/ck_tile/01_fmha/codegen/ops/fmha_fwd.py
+@@ -2055,9 +2055,13 @@ def get_product(receipt: int) -> Product:
+     elif receipt == 700:
+ 
+         def fit(problem_ctx: ProblemContext, kernel_ctx: KernelContext) -> bool:
+-            cond = problem_ctx.dtype in ["fp16", "bf16"]
++            cond = problem_ctx.dtype in ["fp16", "bf16", "fp8bf16"]
+             cond &= kernel_ctx.pipeline.F_vlayout == "row"
+-            cond &= kernel_ctx.pipeline.F_qscale == "no"
++            cond &= kernel_ctx.pipeline.F_qscale == "no" or (
++                problem_ctx.dtype == "fp8bf16" and kernel_ctx.pipeline.F_qscale == "pertensor"
++            )
+-            cond &= kernel_ctx.pipeline.F_lse == "t"
++            cond &= kernel_ctx.pipeline.F_lse == "t" or (
++                problem_ctx.dtype == "fp8bf16" and kernel_ctx.pipeline.F_lse == "f"
++            )
+             cond &= kernel_ctx.pipeline.F_skip == "f"
+             cond &= kernel_ctx.pipeline.F_logits == "f"
