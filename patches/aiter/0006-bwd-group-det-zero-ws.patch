@@ -10,14 +10,16 @@ workspace starts zeroed. Batch mode is already covered by the launcher's own
 persistent-path zeroing.
 
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
+index 4abea57df5..0c1e9ce594 100644
 --- a/csrc/cpp_itfs/mha_bwd.cu
 +++ b/csrc/cpp_itfs/mha_bwd.cu
-@@ -163,6 +163,7 @@
-
+@@ -168,7 +168,8 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+     };
+ 
      fmha_bwd_launcher launcher(traits);
 -    void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/false);
 +    const bool zero_ws = a.is_deterministic && a.is_group_mode;
 +    void* workspace_ptr = a.workspace_alloc(launcher.workspace_size, /*zero_init=*/zero_ws);
-
+ 
      // Enqueues the workspace prep on the caller's stream: dq_acc zero (if needed)
      // plus an on-device kernel that writes the nsplits[]/offsets[] metadata. Fully

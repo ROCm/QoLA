@@ -81,37 +81,38 @@ def build_namespace(aiter_root: str) -> AiterNamespace:
 # AITER_CONFIGS extraction
 # ------------------------------------------------------------------
 
-_CONFIG_START = "# config_env start here"
-_CONFIG_END = "# config_env end here"
-
-
 def _build_aiter_configs(core_path: str, aiter_root_dir: str) -> Any:
-    """Extract the AITER_CONFIG class from core.py and instantiate it.
+    """Return the ``AITER_CONFIGS`` singleton from AITER's core.py.
 
-    Executes only the marked ``# config_env start/end`` block (lines 68-279)
-    in a namespace where ``AITER_ROOT_DIR`` is bound.  All properties of
-    ``AITER_CONFIG`` reference ``AITER_ROOT_DIR`` through the module-level
-    ``AITER_CONFIG_*`` string constants defined in the same block.
+    Loads ``core.py`` as an isolated module via importlib (same mechanism as
+    ``load_build_module_fn``) and reads its module-level ``AITER_CONFIGS``.
+
+    Historically this exec'd only the marked ``# config_env start/end`` block
+    with a hand-built namespace, to avoid running ``aiter/__init__.py``.  But
+    newer AITER lineages grew ``get_config_file`` to reference module-level
+    helpers defined outside that block (``logger``, ``re``, ``mp_lock``,
+    ``FileBaton`` ...), which made the block non-self-contained.  Loading the
+    full module (without importing the ``aiter`` package) is both simpler and
+    robust to where inside core.py these helpers live.
     """
-    with open(core_path, "r") as f:
-        source = f.read()
+    jit_dir = os.path.dirname(os.path.abspath(core_path))
+    utils_dir = os.path.join(jit_dir, "utils")
+    for d in (utils_dir, jit_dir):
+        if d not in sys.path:
+            sys.path.insert(0, d)
 
-    start = source.find(_CONFIG_START)
-    end = source.find(_CONFIG_END)
-    if start == -1 or end == -1:
+    spec = importlib.util.spec_from_file_location("_qola_jit_core_cfg", core_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Cannot load core.py from {core_path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    try:
+        return mod.AITER_CONFIGS  # type: ignore[attr-defined]
+    except AttributeError as e:
         raise RuntimeError(
-            f"Could not find config_env markers in {core_path}. "
-            "AITER core.py structure may have changed."
-        )
-    block = source[start : end + len(_CONFIG_END)]
-
-    exec_ns: dict[str, Any] = {
-        "os": os,
-        "functools": __import__("functools"),
-        "AITER_ROOT_DIR": aiter_root_dir,
-    }
-    exec(compile(block, core_path, "exec"), exec_ns)  # noqa: S102
-    return exec_ns["AITER_CONFIGS"]
+            f"AITER core.py at {core_path} does not define AITER_CONFIGS; "
+            "its structure may have changed."
+        ) from e
 
 
 # ------------------------------------------------------------------

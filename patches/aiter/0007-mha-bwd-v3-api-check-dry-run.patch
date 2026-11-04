@@ -20,7 +20,7 @@ Two fixes to csrc/cpp_itfs/mha_bwd.cu:
      load.
 
 diff --git a/csrc/cpp_itfs/mha_bwd.cu b/csrc/cpp_itfs/mha_bwd.cu
-index c80fef1fb1..b5f18c94be 100644
+index 0c1e9ce594..69bab2bc20 100644
 --- a/csrc/cpp_itfs/mha_bwd.cu
 +++ b/csrc/cpp_itfs/mha_bwd.cu
 @@ -141,6 +141,9 @@ float mha_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
@@ -33,7 +33,7 @@ index c80fef1fb1..b5f18c94be 100644
      if(a.is_group_mode && (a.seqstart_q_ptr == nullptr || a.seqstart_k_ptr == nullptr))
      {
          AITER_LOG_ERROR("mha_bwd: group mode requires seqstart_q_ptr and seqstart_k_ptr");
-@@ -424,6 +427,9 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -416,6 +419,9 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
          need_post_processing = false;
      }
  
@@ -43,7 +43,7 @@ index c80fef1fb1..b5f18c94be 100644
      int ts_odo;
      int ts_kv;
      int ts_dq;
-@@ -485,9 +491,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
+@@ -477,9 +483,6 @@ float fmha_v3_bwd(mha_bwd_args a, const ck_tile::stream_config& s)
          }
      }
  

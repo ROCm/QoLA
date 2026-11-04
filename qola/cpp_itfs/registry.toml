@@ -57,3 +57,26 @@ hsa_subdirs  = ["fmha_v3_bwd"]
 add_blob_gen_cmd = [
     "{AITER_META_DIR}/hsa/codegen.py -m fmha_v3_bwd --output_dir {{}}",
 ]
+
+# The two a4w4 entries below are keyed on AITER's *pybind* module names rather
+# than on dedicated `libgemm_a4w4_*` entries.  cpp_itfs mode already forces
+# torch_exclude=True / is_python_module=False, which is the only thing those
+# dedicated entries added, so keying on `module_*` lets AITER carry a single
+# recipe per kernel.  Consumers pin the artifact name back via the manifest's
+# `md_name` override.
+
+[module_gemm_a4w4_blockscale]
+# Strip the pybind-only sources the `module_*` entry carries; the kernel TU
+# (gemm_a4w4_blockscale.cu) is already torch-free.
+drop_srcs    = ["gemm_a4w4_blockscale_pybind.cu", "gemm_common.cu"]
+add_srcs     = ["qola/cpp_itfs/qola_gemm_a4w4_blockscale.cu"]
+add_includes = ["qola/cpp_itfs"]
+# CK blockscale path: kernels are generated (gen_instances.py), no HSA blobs.
+
+[module_gemm_a4w4_asm]
+# Strip the pybind TU; the kernel TU (asm_gemm_a4w4.cu) is already torch-free,
+# taking aiter_tensor_t* rather than torch::Tensor.
+drop_srcs    = ["gemm_a4w4_asm_pybind.cu"]
+add_srcs     = ["qola/cpp_itfs/qola_gemm_a4w4_asm.cu"]
+add_includes = ["qola/cpp_itfs"]
+hsa_subdirs  = ["f4gemm"]

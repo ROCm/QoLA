@@ -15,10 +15,10 @@ QoLA always builds AITER with -DAITER_EMBEDDED_HSA_HEADER and embeds the
    macro.
 
 diff --git a/csrc/include/aiter_hip_common.h b/csrc/include/aiter_hip_common.h
-index e4c9641af..697364606 100644
+index f4d3748b58..27b86127dd 100644
 --- a/csrc/include/aiter_hip_common.h
 +++ b/csrc/include/aiter_hip_common.h
-@@ -290,6 +290,13 @@ class AiterAsmKernelFast
+@@ -408,6 +408,13 @@ class AiterAsmKernelFast
      };
  };
  
@@ -32,7 +32,7 @@ index e4c9641af..697364606 100644
  class AiterAsmKernel : private AiterAsmKernelFast
  {
      private:
-@@ -380,44 +387,23 @@ class AiterAsmKernel : private AiterAsmKernelFast
+@@ -498,44 +505,23 @@ class AiterAsmKernel : private AiterAsmKernelFast
          }
      }
  
@@ -91,7 +91,7 @@ index e4c9641af..697364606 100644
      }
  
      public:
-@@ -428,6 +414,7 @@ class AiterAsmKernel : private AiterAsmKernelFast
+@@ -554,6 +540,7 @@ class AiterAsmKernel : private AiterAsmKernelFast
  
      using AiterAsmKernelFast::launch_kernel;
  };

@@ -8,6 +8,18 @@ import argparse
 import sys
 
 
+def _split_list(entries: list[str] | None) -> list[str] | None:
+    """Flatten repeatable ``;``-separated CLI values into a flat list.
+
+    ``--group a --group "b;c"`` becomes ``["a", "b", "c"]``.  Returns
+    ``None`` when the flag was never passed, so downstream precedence
+    (manifest / env fallbacks) can distinguish "unset" from "empty".
+    """
+    if not entries:
+        return None
+    return [v for entry in entries for v in entry.split(";") if v]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="qola",
@@ -77,6 +89,16 @@ def main(argv: list[str] | None = None) -> int:
         "when this is set.",
     )
     build_p.add_argument(
+        "--group",
+        action="append",
+        dest="groups",
+        help="Build only the [[modules]] entries whose 'group' matches. "
+        "Repeatable, and accepts a ';'-separated list. Lets one manifest "
+        "(one AITER commit, one patch set, one checkout) serve several "
+        "consumers that each build their own subset of kernels. When "
+        "omitted, every module in the manifest is built.",
+    )
+    build_p.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -119,15 +141,27 @@ def main(argv: list[str] | None = None) -> int:
         "Overrides the manifest's [qola] patches_dir. Defaults to "
         "<QoLA repo>/patches/aiter; point at an empty directory to skip.",
     )
+    checkout_p.add_argument(
+        "--group",
+        action="append",
+        dest="groups",
+        help="Validate that the manifest declares these module group(s) "
+        "before checking out, and report which modules they cover. "
+        "Repeatable, and accepts a ';'-separated list. Every group in a "
+        "manifest shares one tree (one commit, one patch set), so this does "
+        "not change what gets checked out — it lets a consumer that checks "
+        "out per group fail fast on a bad group name instead of at "
+        "`qola build --group` time. Requires --manifest.",
+    )
 
     args = parser.parse_args(argv)
+
+    groups = _split_list(getattr(args, "groups", None))
 
     if args.command == "build":
         from .build_tools import build_kernels
 
-        archs: list[str] | None = None
-        if args.archs:
-            archs = [a for entry in args.archs for a in entry.split(";") if a]
+        archs = _split_list(args.archs)
 
         result = build_kernels(
             manifest_path=args.manifest,
@@ -139,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             aiter_commit=args.aiter_commit,
             patches_dir=args.patches_dir,
             skip_checkout=args.skip_checkout,
+            groups=groups,
         )
         s = result["summary"]
         print(
@@ -158,6 +193,7 @@ def main(argv: list[str] | None = None) -> int:
             aiter_root=args.aiter_root,
             aiter_commit=args.aiter_commit,
             patches_dir=args.patches_dir,
+            groups=groups,
         )
         print(f"AITER ready at {path}")
     return 0
