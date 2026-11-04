@@ -14,8 +14,6 @@
   global:
     extern "C++" {
       qola::*;
-      "typeinfo for qola::*";
-      "typeinfo name for qola::*";
     };
   local:
     *;
